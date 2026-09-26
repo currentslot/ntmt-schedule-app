@@ -6,7 +6,6 @@
 
 <p align="center">
   Неофициальное приложение для Android. Расписание с публичной страницы <a href="https://nti.urfu.ru/schedule-ntmt">nti.urfu.ru/schedule-ntmt</a>.<br>
-  
   Создано с помощью Grok Build.
 </p>
 
