@@ -47,12 +47,7 @@
 
 ## Обновление приложения
 
-Два канала: Stable и βeta. Публикация сборок через панель [Zealot](https://github.com/tryzealot/zealot).
+Два канала: Stable и βeta. 
+Канал βeta имеет нестабильные пакеты с функциями в раннем доступе.
+Публикация сборок через панель [Zealot](https://github.com/tryzealot/zealot).
 
-## Сборка
-
-```bash
-./gradlew assembleRelease
-```
-
-Нужны JDK 17 и Android SDK. Файл: `app/build/outputs/apk/release/app-release.apk`.
