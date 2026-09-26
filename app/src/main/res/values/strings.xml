@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Расписание НТМТ</string>
+    <string name="widget_name">Расписание НТМТ</string>
+    <string name="widget_desc">Пары на сегодня. Размер можно менять.</string>
+</resources>
