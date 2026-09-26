@@ -56,7 +56,3 @@
 ```
 
 Нужны JDK 17 и Android SDK. Файл: `app/build/outputs/apk/release/app-release.apk`.
-
-## Помощь в тестировании
-
-[GhostMehvrag](https://github.com/GhostMehvrag)
