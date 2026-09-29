@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -22,6 +23,7 @@ data class PrefState(
     val autoRefresh: Boolean = true,
     val autoRefreshTime: String = "06:00",
     val theme: String = "auto",
+    val materialYou: Boolean = true,
     val tab: String = "Today",
     val launcher: String = "calendar",
     val snapshot: String? = null,
@@ -39,12 +41,15 @@ data class PrefState(
     val widgetFullDate: Boolean = false,
     val widgetOpen: String = "Today",
     val widgetAlpha: Int = 100,
-    val updateChannel: String = "beta",
-    val updateSource: String = "server",
+    val updateChannel: String = "stable",
+    val updateSource: String = "github",
     val updateNotify: Boolean = true,
     val updateAuto: Boolean = true,
     val updateCheckTime: String = "09:00",
     val lastUpdateCheck: String? = null,
+    val lastUpdateCheckAt: Long = 0L,
+    val lastLiveCheck: Long = 0L,
+    val availableUpdate: Int = 0,
     val lastNotifiedUpdate: Int = 0,
 )
 
@@ -57,6 +62,7 @@ class Prefs(private val context: Context) {
     private val AR = booleanPreferencesKey("autoRefresh")
     private val ART = stringPreferencesKey("autoRefreshTime")
     private val TH = stringPreferencesKey("theme")
+    private val MY = booleanPreferencesKey("materialYou")
     private val T = stringPreferencesKey("tab")
     private val L = stringPreferencesKey("launcher")
     private val S = stringPreferencesKey("snapshot")
@@ -80,6 +86,9 @@ class Prefs(private val context: Context) {
     private val UA = booleanPreferencesKey("updateAuto")
     private val UCT = stringPreferencesKey("updateCheckTime")
     private val LUC = stringPreferencesKey("lastUpdateCheck")
+    private val LUCA = longPreferencesKey("lastUpdateCheckAt")
+    private val LLC = longPreferencesKey("lastLiveCheck")
+    private val AU = intPreferencesKey("availableUpdate")
     private val LNU = intPreferencesKey("lastNotifiedUpdate")
 
     val state: Flow<PrefState> = context.ds.data.map { saved ->
@@ -92,6 +101,7 @@ class Prefs(private val context: Context) {
             autoRefresh = saved[AR] ?: true,
             autoRefreshTime = normTime(saved[ART], "06:00"),
             theme = saved[TH] ?: "auto",
+            materialYou = saved[MY] ?: true,
             tab = saved[T] ?: "Today",
             launcher = normLauncher(saved[L]),
             snapshot = saved[S],
@@ -109,14 +119,38 @@ class Prefs(private val context: Context) {
             widgetFullDate = saved[WF] ?: false,
             widgetOpen = normTab(saved[WO]),
             widgetAlpha = (saved[WA] ?: 100).coerceIn(10, 100),
-            updateChannel = if (saved[UC] == "stable") "stable" else "beta",
-            updateSource = if (saved[US] == "github") "github" else "server",
+            updateChannel = when (saved[UC]) {
+                "beta" -> "beta"
+                else -> "stable"
+            },
+            updateSource = when (saved[US]) {
+                "server" -> "server"
+                else -> "github"
+            },
             updateNotify = saved[UN] ?: true,
             updateAuto = saved[UA] ?: true,
             updateCheckTime = normTime(saved[UCT], "09:00"),
             lastUpdateCheck = saved[LUC],
+            lastUpdateCheckAt = saved[LUCA] ?: 0L,
+            lastLiveCheck = saved[LLC] ?: 0L,
+            availableUpdate = saved[AU] ?: 0,
             lastNotifiedUpdate = saved[LNU] ?: 0,
         )
+    }
+
+    suspend fun ensureUpdateDefaults() = context.ds.edit { saved ->
+        if (saved[UC] != null || saved[US] != null) return@edit
+        val legacy = saved.asMap().isNotEmpty()
+        if (legacy) {
+            saved[UC] = "beta"
+            saved[US] = "server"
+        } else {
+            saved[UC] = "stable"
+            saved[US] = "github"
+            saved[UN] = true
+            saved[UA] = true
+            saved[MY] = true
+        }
     }
 
     suspend fun setGroup(v: String) = context.ds.edit { it[G] = v; it.remove(S) }
@@ -136,6 +170,7 @@ class Prefs(private val context: Context) {
     suspend fun setAutoRefresh(v: Boolean) = context.ds.edit { it[AR] = v }
     suspend fun setAutoRefreshTime(v: String) = context.ds.edit { it[ART] = normTime(v, "06:00") }
     suspend fun setTheme(v: String) = context.ds.edit { it[TH] = v }
+    suspend fun setMaterialYou(v: Boolean) = context.ds.edit { it[MY] = v }
     suspend fun setTab(v: String) = context.ds.edit { it[T] = v }
     suspend fun setSnapshot(v: String) = context.ds.edit { it[S] = v }
     suspend fun setLastMorning(v: String) = context.ds.edit { it[LM] = v }
@@ -160,6 +195,9 @@ class Prefs(private val context: Context) {
     suspend fun setUpdateAuto(v: Boolean) = context.ds.edit { it[UA] = v }
     suspend fun setUpdateCheckTime(v: String) = context.ds.edit { it[UCT] = normTime(v, "09:00") }
     suspend fun setLastUpdateCheck(v: String) = context.ds.edit { it[LUC] = v }
+    suspend fun setLastUpdateCheckAt(v: Long) = context.ds.edit { it[LUCA] = v }
+    suspend fun setLastLiveCheck(v: Long) = context.ds.edit { it[LLC] = v }
+    suspend fun setAvailableUpdate(v: Int) = context.ds.edit { it[AU] = v }
     suspend fun setLastNotifiedUpdate(v: Int) = context.ds.edit { it[LNU] = v }
 
     suspend fun setLauncher(kind: String) {

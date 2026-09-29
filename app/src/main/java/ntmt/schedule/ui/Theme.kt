@@ -5,12 +5,16 @@ import android.graphics.drawable.ColorDrawable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
+import android.os.Build
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -64,8 +68,19 @@ private val Type = Typography(
 )
 
 @Composable
-fun NtmtTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val scheme = if (dark) Dark else Light
+fun NtmtTheme(
+    dark: Boolean = isSystemInDarkTheme(),
+    materialYou: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val context = LocalContext.current
+    val scheme = if (materialYou && Build.VERSION.SDK_INT >= 31) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else if (dark) {
+        Dark
+    } else {
+        Light
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

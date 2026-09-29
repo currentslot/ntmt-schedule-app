@@ -117,7 +117,7 @@ object AppUpdate {
                 versionCode = o.getInt("versionCode"),
                 versionName = o.optString("versionName"),
                 channel = o.optString("channel", safe),
-                notes = o.optString("notes"),
+                notes = plainNotes(o.optString("notes")),
                 size = o.optLong("size"),
                 sha256 = o.optString("sha256"),
                 url = o.optString("url"),
@@ -166,7 +166,7 @@ object AppUpdate {
                     versionCode = bestCode,
                     versionName = item.optString("release_version").ifBlank { bestCode.toString() },
                     channel = channel,
-                    notes = item.optString("text_changelog"),
+                    notes = notesOf(item),
                     size = item.optLong("size"),
                     sha256 = "",
                     url = item.optString("install_url"),
@@ -179,6 +179,64 @@ object AppUpdate {
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun notesOf(item: JSONObject): String {
+        val parts = mutableListOf<String>()
+        fun add(raw: String?) {
+            val text = plainNotes(raw.orEmpty())
+            if (text.isNotBlank()) parts += text
+        }
+        when (val raw = item.opt("changelog")) {
+            is JSONArray -> for (i in 0 until raw.length()) {
+                when (val el = raw.opt(i)) {
+                    is JSONObject -> add(el.optString("message").ifBlank { el.optString("body") }.ifBlank { el.optString("text") })
+                    is String -> add(el)
+                }
+            }
+            is JSONObject -> add(raw.optString("message").ifBlank { raw.optString("body") }.ifBlank { raw.optString("text") })
+            is String -> add(raw)
+        }
+        add(item.optString("text_changelog"))
+        add(item.optString("changelog_text"))
+        add(item.optString("release_notes"))
+        if (parts.isEmpty()) return ""
+        val kept = mutableListOf<String>()
+        for (part in parts.sortedByDescending { it.length }) {
+            if (kept.any { longer -> longer.contains(part) }) continue
+            kept += part
+        }
+        return kept.sortedBy { parts.indexOf(it) }.joinToString("\n")
+    }
+
+    private fun plainNotes(raw: String): String {
+        if (raw.isBlank()) return ""
+        var s = raw.replace("\r\n", "\n")
+        s = s.replace(Regex("(?i)<br\\s*/?>"), "\n")
+        s = s.replace(Regex("(?i)</p>"), "\n")
+        s = s.replace(Regex("(?i)</li>"), "\n")
+        s = s.replace(Regex("(?i)<li[^>]*>"), "• ")
+        s = s.replace(Regex("<[^>]+>"), "")
+        s = decodeEntities(s)
+        s = s.replace(Regex("(?m)^#{1,6}\\s*"), "")
+        s = s.replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+        s = s.replace(Regex("__(.+?)__"), "$1")
+        return s.lines().joinToString("\n") { it.trimEnd() }.replace(Regex("\n{3,}"), "\n\n").trim()
+    }
+
+    private fun decodeEntities(raw: String): String {
+        val nbsp = "&" + "nbsp;"
+        val amp = "&" + "amp;"
+        val lt = "&" + "lt;"
+        val gt = "&" + "gt;"
+        val quot = "&" + "quot;"
+        val apos = "&" + "#39;"
+        return raw.replace(nbsp, " ")
+            .replace(amp, "&")
+            .replace(lt, "<")
+            .replace(gt, ">")
+            .replace(quot, "\"")
+            .replace(apos, "'")
     }
 
     private fun releaseItems(root: JSONObject): List<JSONObject> {
@@ -203,23 +261,22 @@ object AppUpdate {
             if (code !in 200..299) return UpdateCheck(null, false, "Не удалось проверить")
             val arr = JSONArray(text)
             var best: JSONObject? = null
-            var bestAt = ""
+            var bestCode = -1
             for (i in 0 until arr.length()) {
                 val rel = arr.getJSONObject(i)
                 if (rel.optBoolean("draft")) continue
-                if (safe == "stable" && rel.optBoolean("prerelease")) continue
-                if (!matchesChannel(rel, safe)) continue
-                val at = rel.optString("published_at")
-                if (best == null || at > bestAt) {
+                if (isBetaRelease(rel) != (safe == "beta")) continue
+                val asset = newestApk(rel) ?: continue
+                val parsed = parseCode(asset.optString("name"), rel.optString("name") + " " + rel.optString("tag_name"), rel.optString("body"))
+                if (parsed <= 0) continue
+                if (parsed > bestCode) {
                     best = rel
-                    bestAt = at
+                    bestCode = parsed
                 }
             }
             val release = best ?: return UpdateCheck(null, false, null)
             val asset = newestApk(release) ?: return UpdateCheck(null, false, null)
-            val assetName = asset.optString("name")
-            val parsed = parseCode(assetName, release.optString("body"))
-            if (parsed <= 0) return UpdateCheck(null, false, "Не удалось проверить")
+            val parsed = bestCode
             val url = asset.optString("browser_download_url")
             if (!url.startsWith("https://")) return UpdateCheck(null, false, "Не удалось проверить")
             return UpdateCheck(
@@ -227,7 +284,7 @@ object AppUpdate {
                     versionCode = parsed,
                     versionName = release.optString("name").ifBlank { release.optString("tag_name") },
                     channel = safe,
-                    notes = release.optString("body"),
+                    notes = plainNotes(release.optString("body")),
                     size = asset.optLong("size"),
                     sha256 = "",
                     url = url,
@@ -242,21 +299,23 @@ object AppUpdate {
         }
     }
 
-    private fun matchesChannel(rel: JSONObject, channel: String): Boolean {
-        if (rel.optString("target_commitish").equals(channel, true)) return true
-        val label = rel.optString("tag_name") + " " + rel.optString("name")
-        return label.contains(channel, true)
+    private fun isBetaRelease(rel: JSONObject): Boolean {
+        if (rel.optBoolean("prerelease")) return true
+        val label = (rel.optString("tag_name") + " " + rel.optString("name")).lowercase()
+        return label.contains("β") || Regex("(?:^|[^a-z])beta(?:[^a-z]|$)").containsMatchIn(label)
     }
 
     private fun newestApk(rel: JSONObject): JSONObject? {
         val assets = rel.optJSONArray("assets") ?: return null
         var best: JSONObject? = null
         var bestCode = -1
+        val title = rel.optString("name") + " " + rel.optString("tag_name")
+        val body = rel.optString("body")
         for (i in 0 until assets.length()) {
             val asset = assets.getJSONObject(i)
             val name = asset.optString("name")
             if (!name.endsWith(".apk", true)) continue
-            val code = parseCode(name, rel.optString("body"))
+            val code = parseCode(name, title, body)
             if (best == null || code > bestCode) {
                 best = asset
                 bestCode = code
@@ -265,7 +324,9 @@ object AppUpdate {
         return best
     }
 
-    private fun parseCode(name: String, body: String): Int {
+    private fun parseCode(name: String, title: String, body: String): Int {
+        if (name.equals("NTMT-1.8.1-Stable.apk", true)) return 58
+        Regex("\\((\\d{2,})\\)").find(title)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
         Regex("(\\d+)\\.apk$", RegexOption.IGNORE_CASE).find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
         return Regex("versionCode\\s*[:=]\\s*(\\d+)", RegexOption.IGNORE_CASE).find(body)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
     }

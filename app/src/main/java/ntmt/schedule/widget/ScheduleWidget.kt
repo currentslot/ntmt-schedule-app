@@ -7,7 +7,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.RemoteViews
 import java.time.DayOfWeek
@@ -18,6 +21,7 @@ import ntmt.schedule.MainActivity
 import ntmt.schedule.R
 import ntmt.schedule.data.NtmtApi
 import ntmt.schedule.data.Prefs
+import ntmt.schedule.notify.ChangeWatch
 
 class ScheduleWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -31,6 +35,7 @@ class ScheduleWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         ids.forEach { render(context, manager, it) }
+        ChangeWatch.onWidgetUpdated(context)
     }
 
     override fun onAppWidgetOptionsChanged(
@@ -46,15 +51,28 @@ class ScheduleWidget : AppWidgetProvider() {
         const val ACTION_SWAP = "ntmt.schedule.widget.SWAP"
         const val EXTRA_TAB = "open_tab"
 
-        fun refresh(context: Context) {
+        fun refresh(context: Context, config: Configuration? = null) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget::class.java))
-            ids.forEach { render(context, manager, it) }
+            ids.forEach { render(context, manager, it, config, rebind = false) }
+            if (config != null) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val again = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget::class.java))
+                    again.forEach { render(context, manager, it, config, rebind = false) }
+                }, 280)
+            }
         }
 
-        private fun render(context: Context, manager: AppWidgetManager, id: Int) {
+        private fun render(
+            context: Context,
+            manager: AppWidgetManager,
+            id: Int,
+            config: Configuration? = null,
+            rebind: Boolean = true,
+        ) {
             val st = runBlocking { Prefs(context).state.first() }
-            val palette = WidgetPalette.of(WidgetPalette.night(context, st.theme))
+            val night = WidgetPalette.night(context, st.theme, config)
+            val palette = WidgetPalette.resolve(context, night, st.materialYou)
             val views = RemoteViews(context.packageName, R.layout.widget_schedule)
             val open = PendingIntent.getActivity(
                 context,
@@ -65,7 +83,6 @@ class ScheduleWidget : AppWidgetProvider() {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             )
-            views.setPendingIntentTemplate(R.id.widget_list, open)
             views.setOnClickPendingIntent(R.id.widget_body, open)
             val shade = st.widgetAlpha.coerceIn(10, 100)
             views.setInt(R.id.widget_plate, "setColorFilter", palette.bg)
@@ -75,14 +92,17 @@ class ScheduleWidget : AppWidgetProvider() {
             views.setTextColor(R.id.widget_empty, palette.muted)
             views.setInt(R.id.widget_swap, "setColorFilter", palette.fg)
             val widthDp = manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 220)
-            val service = Intent(context, ScheduleWidgetService::class.java).apply {
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                putExtra("night", palette.night)
-                putExtra("widthDp", widthDp)
-                data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+            if (rebind) {
+                views.setPendingIntentTemplate(R.id.widget_list, open)
+                val service = Intent(context, ScheduleWidgetService::class.java).apply {
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    putExtra("night", palette.night)
+                    putExtra("widthDp", widthDp)
+                    data = Uri.parse("ntmt://widget/$id/$widthDp/${if (palette.night) 1 else 0}")
+                }
+                views.setRemoteAdapter(R.id.widget_list, service)
+                views.setEmptyView(R.id.widget_list, R.id.widget_empty)
             }
-            views.setRemoteAdapter(R.id.widget_list, service)
-            views.setEmptyView(R.id.widget_list, R.id.widget_empty)
 
             val group = st.group
             val pack = ntmt.schedule.data.ScheduleCache.load(context)
@@ -117,7 +137,8 @@ class ScheduleWidget : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_swap, View.GONE)
                 views.setOnClickPendingIntent(R.id.widget_title_btn, open)
             }
-            manager.updateAppWidget(id, views)
+            if (rebind) manager.updateAppWidget(id, views)
+            else manager.partiallyUpdateAppWidget(id, views)
             manager.notifyAppWidgetViewDataChanged(id, R.id.widget_list)
         }
 

@@ -75,7 +75,6 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<UpdateCheck?>(null) }
     var progress by remember { mutableIntStateOf(-1) }
-    var timeEdit by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(AppUpdate.sweepInstalled(ctx)) }
     val fetch by UpdateFetch.state.collectAsState()
 
@@ -100,6 +99,11 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
                 AppUpdate.check(st.updateSource, st.updateChannel, versionCode)
             }
             result = found
+            if (found.newer && found.release != null) {
+                prefs.setAvailableUpdate(found.release.versionCode)
+            } else if (found.error == null) {
+                prefs.setAvailableUpdate(0)
+            }
             checking = false
         }
     }
@@ -197,18 +201,8 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
                 Line("Уведомление об обновлении", "Когда на канале есть более новая сборка", st.updateNotify) {
                     scope.launch { prefs.setUpdateNotify(it) }
                 }
-                Line("Автопроверка", "Один раз в выбранное время", st.updateAuto) {
+                Line("Автопроверка", "При запуске и каждые 6 часов с виджетом. Только сервер разработчика", st.updateAuto) {
                     scope.launch { prefs.setUpdateAuto(it) }
-                }
-                if (st.updateAuto) {
-                    SettingsTap(
-                        title = "Время проверки",
-                        hint = "24 часа",
-                        trailing = {
-                            Text(st.updateCheckTime, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-                        },
-                        onClick = { timeEdit = true },
-                    )
                 }
             }
         }
@@ -310,18 +304,6 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
         }
     }
     }
-
-    if (timeEdit) {
-        TimePickDialog(
-            title = "Время проверки обновлений",
-            initial = st.updateCheckTime,
-            onDismiss = { timeEdit = false },
-            onConfirm = { v ->
-                scope.launch { prefs.setUpdateCheckTime(v) }
-                timeEdit = false
-            },
-        )
-    }
 }
 
 @Composable
@@ -360,7 +342,7 @@ private fun ReleaseCard(
     Text("Доступно ${release.versionName}", style = MaterialTheme.typography.bodyLarge)
     if (release.notes.isNotBlank()) {
         Text(
-            release.notes.take(280),
+            release.notes,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

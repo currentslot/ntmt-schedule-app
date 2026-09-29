@@ -2,6 +2,7 @@
     <color name="md_primary">#B3261E</color>
     <color name="md_navy">#172338</color>
     <color name="ic_launcher_bg">#B3261E</color>
+    <color name="window_bg">#FFFBFF</color>
     <color name="widget_bg">#F7F2F4</color>
     <color name="widget_fg">#1C1B1F</color>
     <color name="widget_muted">#79747E</color>

@@ -2,10 +2,16 @@ package ntmt.schedule.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.SizeTransform
@@ -38,7 +44,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -94,6 +100,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -127,6 +134,8 @@ import ntmt.schedule.data.ScheduleCache
 import ntmt.schedule.data.ru
 import ntmt.schedule.notify.Notify
 import ntmt.schedule.WidgetOpen
+import ntmt.schedule.update.AppUpdate
+import ntmt.schedule.update.UpdateAuto
 import ntmt.schedule.widget.ScheduleWidget
 import android.Manifest
 import android.content.Context
@@ -161,6 +170,7 @@ fun NtmtAppUi() {
     var refreshing by remember { mutableStateOf(false) }
     var stale by remember { mutableStateOf(false) }
     var fetchFailed by remember { mutableStateOf(false) }
+    var online by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun pull() {
@@ -216,6 +226,14 @@ fun NtmtAppUi() {
             all = cached.second
         }
         launch { try { prefs.setLauncher(first.launcher) } catch (_: Exception) {} }
+        launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    UpdateAuto.run(ctx, force = true)
+                } catch (_: Exception) {
+                }
+            }
+        }
         refreshing = true
         pull()
         refreshing = false
@@ -229,6 +247,10 @@ fun NtmtAppUi() {
             tab = next
             prefs.setTab(next.name)
         }
+    }
+
+    LaunchedEffect(fetchFailed, refreshing) {
+        online = withContext(Dispatchers.IO) { NtmtApi.online(ctx) }
     }
 
     fun go(next: Tab) {
@@ -252,7 +274,7 @@ fun NtmtAppUi() {
         else -> systemDark
     }
 
-    NtmtTheme(dark = dark) {
+    NtmtTheme(dark = dark, materialYou = st.materialYou) {
         if (!restored) {
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
             return@NtmtTheme
@@ -306,6 +328,7 @@ fun NtmtAppUi() {
                 )
                 else -> HomeScaffold(
                     st, prefs, catalog, all, err, refreshing, fetchFailed, tab, offset,
+                    updateReady = online && st.availableUpdate > AppUpdate.installedCode(ctx),
                     onTab = { go(it) },
                     onOffset = { offset = it },
                     onReload = { reload() },
@@ -336,6 +359,7 @@ private fun HomeScaffold(
     fetchFailed: Boolean,
     tab: Tab,
     offset: Int,
+    updateReady: Boolean,
     onTab: (Tab) -> Unit,
     onOffset: (Int) -> Unit,
     onReload: () -> Unit,
@@ -391,6 +415,61 @@ private fun HomeScaffold(
                     }
                 },
                 actions = {
+                    if (updateReady) {
+                        var showLabel by remember { mutableStateOf(true) }
+                        LaunchedEffect(updateReady) {
+                            showLabel = true
+                            kotlinx.coroutines.delay(10_000)
+                            showLabel = false
+                        }
+                        val pulse = rememberInfiniteTransition(label = "update-pulse")
+                        val glow by pulse.animateFloat(
+                            initialValue = 0.55f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1600, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse,
+                            ),
+                            label = "update-glow",
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .padding(end = 2.dp)
+                                .height(30.dp)
+                                .animateContentSize(tween(320, easing = FastOutSlowInEasing))
+                                .alpha(glow)
+                                .clip(CircleShape)
+                                .clickable(onClick = onUpdates),
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.ic_system_update),
+                                    contentDescription = "Доступно обновление",
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                AnimatedVisibility(
+                                    visible = showLabel,
+                                    enter = fadeIn(tween(160)) + expandHorizontally(tween(280, easing = FastOutSlowInEasing)),
+                                    exit = fadeOut(tween(180)) + shrinkHorizontally(tween(320, easing = FastOutSlowInEasing)),
+                                ) {
+                                    Text(
+                                        "Доступно обновление",
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(start = 4.dp, end = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                     val spin = rememberInfiniteTransition(label = "refresh")
                     val angle by spin.animateFloat(
                         initialValue = 0f,
@@ -741,7 +820,7 @@ private fun MorePane(
                 }
                 if (notes) {
                     Text(
-                        "• Исправленна задержка открытия списка пар при отсутствии сети\n• Визуальные изменения\n• Добавлены анимации",
+                        "• Добавлена адаптивная тема Material You\n• Подключен источник обновлений: GitHub\n• Исправления ошибок",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -769,8 +848,8 @@ private fun MorePane(
         }
 
         SettingsBlock("Уведомления") {
-            Line("Изменения расписания", "Когда на сайте правят пары группы", st.notify) { scope.launch { prefs.setNotify(it) } }
-            Line("Напоминание о парах", "В выбранное время", st.morning) { scope.launch { prefs.setMorning(it) } }
+            Line("Изменения расписания", "Только уведомление, если слежение нашло правку", st.notify) { scope.launch { prefs.setNotify(it) } }
+            Line("Напоминание о парах", "В выбранное время и только в дни, когда есть пары", st.morning) { scope.launch { prefs.setMorning(it) } }
             if (st.morning) {
                 SettingsTap(
                     title = "Время напоминания",
@@ -798,7 +877,7 @@ private fun MorePane(
         SettingsBlock("Обновление") {
             Line(
                 "Следить по активности",
-                "Дата с сайта при экране и сети. Полное расписание — только если она сменилась",
+                "Каждые 30 минут, когда обновляется виджет или открыт рабочий стол",
                 st.liveWatch,
             ) { scope.launch { prefs.setLiveWatch(it) } }
             Line("Автообновление расписания", "Подтянуть пары с сайта в выбранное время", st.autoRefresh) { scope.launch { prefs.setAutoRefresh(it) } }
@@ -857,11 +936,16 @@ private fun MorePane(
             Line("Сетка курса", "Подсветить звонки курса по номеру группы", st.highlightCourse) { scope.launch { prefs.setHighlightCourse(it) } }
             Line("Выделять сегодня", "Рамка дня на вкладке «Неделя»", st.highlightWeekToday) { scope.launch { prefs.setHighlightWeekToday(it) } }
             Text("Тема", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-            Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("auto" to "Авто", "light" to "Светлая", "dark" to "Тёмная").forEach { (id, label) ->
                     FilterChip(selected = st.theme == id, onClick = { scope.launch { prefs.setTheme(id); ScheduleWidget.refresh(ctx) } }, label = { Text(label) })
                 }
             }
+            Line(
+                "Адаптивная тема",
+                "Material You: цвета приложения и виджета как в системе",
+                st.materialYou,
+            ) { scope.launch { prefs.setMaterialYou(it); ScheduleWidget.refresh(ctx) } }
         }
 
         SettingsBlock("Виджет") {
@@ -1044,7 +1128,7 @@ private fun VersionMark() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Версия 1.8.1 Stable",
+            "Версия 1.9 Stable (63)",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

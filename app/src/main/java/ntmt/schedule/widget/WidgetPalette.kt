@@ -1,8 +1,11 @@
 package ntmt.schedule.widget
 
-import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
 
 data class WidgetPalette(
     val night: Boolean,
@@ -10,6 +13,7 @@ data class WidgetPalette(
     val fg: Int,
     val muted: Int,
     val pill: Int,
+    val dynamic: Boolean = false,
 ) {
     fun textTone(base: Int, percent: Int): Int {
         val t = (100 - percent.coerceIn(10, 100)) / 90f
@@ -30,10 +34,42 @@ data class WidgetPalette(
             WidgetPalette(false, 0xFFF7F2F4.toInt(), 0xFF1C1B1F.toInt(), 0xFF79747E.toInt(), 0xFFE7E0E4.toInt())
         }
 
-        fun night(context: Context, theme: String): Boolean = when (theme) {
+        fun resolve(context: Context, night: Boolean, materialYou: Boolean): WidgetPalette {
+            val classic = of(night)
+            if (!materialYou || Build.VERSION.SDK_INT < 31) return classic
+            return try {
+                val bg = context.getColor(if (night) android.R.color.system_neutral1_800 else android.R.color.system_accent2_100)
+                val fg = context.getColor(if (night) android.R.color.system_neutral1_50 else android.R.color.system_neutral1_900)
+                val muted = context.getColor(if (night) android.R.color.system_neutral2_200 else android.R.color.system_accent2_700)
+                val pill = context.getColor(if (night) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+                var safeBg = opaque(bg)
+                var safeFg = opaque(fg)
+                if (contrast(safeBg, safeFg) < 4.0) {
+                    safeFg = if (night) 0xFFF4F1F4.toInt() else 0xFF1C1B1F.toInt()
+                }
+                if (contrast(safeBg, safeFg) < 3.2) {
+                    safeBg = opaque(mix(safeBg, if (night) 0xFF000000.toInt() else 0xFFFFFFFF.toInt(), 0.5f))
+                }
+                val safeMuted = if (contrast(safeBg, muted) < 2.2) safeFg else opaque(muted)
+                val rawPill = opaque(pill)
+                val safePill = if (contrast(safeBg, rawPill) < 1.25) {
+                    opaque(mix(safeBg, safeFg, if (night) 0.28f else 0.18f))
+                } else {
+                    rawPill
+                }
+                WidgetPalette(night, safeBg, safeFg, safeMuted, safePill, dynamic = true)
+            } catch (_: Exception) {
+                classic
+            }
+        }
+
+        fun night(context: Context, theme: String, config: Configuration? = null): Boolean = when (theme) {
             "dark" -> true
             "light" -> false
-            else -> systemNight(context)
+            else -> {
+                val ui = (config ?: context.resources.configuration).uiMode and Configuration.UI_MODE_NIGHT_MASK
+                ui == Configuration.UI_MODE_NIGHT_YES
+            }
         }
 
         fun tint(rgb: Int, percent: Int): Int {
@@ -54,13 +90,20 @@ data class WidgetPalette(
             return (ch(fr, tr) shl 16) or (ch(fg, tg) shl 8) or ch(fb, tb)
         }
 
-        private fun systemNight(context: Context): Boolean {
-            val ui = context.getSystemService(UiModeManager::class.java)
-            return when (ui?.nightMode) {
-                UiModeManager.MODE_NIGHT_YES -> true
-                UiModeManager.MODE_NIGHT_NO -> false
-                else -> (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        fun contrast(a: Int, b: Int): Double {
+            val hi = max(luminance(a), luminance(b))
+            val lo = min(luminance(a), luminance(b))
+            return (hi + 0.05) / (lo + 0.05)
+        }
+
+        private fun luminance(color: Int): Double {
+            fun ch(v: Int): Double {
+                val s = v / 255.0
+                return if (s <= 0.03928) s / 12.92 else ((s + 0.055) / 1.055).pow(2.4)
             }
+            return 0.2126 * ch((color shr 16) and 0xFF) +
+                0.7152 * ch((color shr 8) and 0xFF) +
+                0.0722 * ch(color and 0xFF)
         }
     }
 }

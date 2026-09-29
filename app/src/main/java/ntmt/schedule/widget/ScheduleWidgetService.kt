@@ -1,7 +1,9 @@
 package ntmt.schedule.widget
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Paint
+import android.os.Build
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import kotlinx.coroutines.flow.first
@@ -22,6 +24,7 @@ class ScheduleWidgetService : RemoteViewsService() {
         private var rows: List<Line> = emptyList()
         private var palette: WidgetPalette = WidgetPalette.of(false)
         private var widthDp: Int = 220
+        private var alpha: Int = 100
 
         override fun onCreate() = load()
         override fun onDataSetChanged() = load()
@@ -34,10 +37,11 @@ class ScheduleWidgetService : RemoteViewsService() {
         override fun getViewAt(position: Int): RemoteViews {
             val line = rows.getOrElse(position) { Line("", "Сегодня пар нет", false) }
             val views = RemoteViews(context.packageName, R.layout.widget_pair)
-            val pill = if (palette.night) R.drawable.widget_pill_dark else R.drawable.widget_pill_light
+            val pillColor = palette.pillTone(alpha)
+            val chipFg = if (WidgetPalette.contrast(pillColor, palette.fg) >= 3.0) palette.fg else palette.bg
             views.setTextColor(R.id.pair_title, palette.fg)
             views.setTextColor(R.id.pair_more, palette.fg)
-            views.setTextColor(R.id.pair_chip, palette.fg)
+            views.setTextColor(R.id.pair_chip, chipFg)
             views.setViewVisibility(R.id.pair_more, android.view.View.GONE)
             if (line.meta.isBlank()) {
                 views.setViewVisibility(R.id.pair_chip, android.view.View.GONE)
@@ -46,7 +50,16 @@ class ScheduleWidgetService : RemoteViewsService() {
             } else {
                 views.setViewVisibility(R.id.pair_chip, android.view.View.VISIBLE)
                 views.setTextViewText(R.id.pair_chip, line.meta)
-                views.setInt(R.id.pair_chip, "setBackgroundResource", pill)
+                if (palette.dynamic && Build.VERSION.SDK_INT >= 31) {
+                    views.setInt(R.id.pair_chip, "setBackgroundResource", R.drawable.widget_pill_mask)
+                    views.setColorStateList(R.id.pair_chip, "setBackgroundTintList", ColorStateList.valueOf(pillColor))
+                } else {
+                    views.setInt(
+                        R.id.pair_chip,
+                        "setBackgroundResource",
+                        if (palette.night) R.drawable.widget_pill_dark else R.drawable.widget_pill_light,
+                    )
+                }
                 val (head, tail) = splitTitle(line.title, line.meta)
                 if (head.isEmpty()) {
                     views.setViewVisibility(R.id.pair_title, android.view.View.GONE)
@@ -75,7 +88,9 @@ class ScheduleWidgetService : RemoteViewsService() {
         private fun load() {
             rows = runBlocking {
                 val st = Prefs(context).state.first()
-                palette = WidgetPalette.of(intent.getBooleanExtra("night", WidgetPalette.night(context, st.theme)))
+                val night = WidgetPalette.night(context, st.theme, context.resources.configuration)
+                palette = WidgetPalette.resolve(context, night, st.materialYou)
+                alpha = st.widgetAlpha
                 widthDp = intent.getIntExtra("widthDp", 220).coerceAtLeast(120)
                 val group = st.group
                 val weeks = group?.let { ScheduleCache.load(context)?.second?.get(it) }

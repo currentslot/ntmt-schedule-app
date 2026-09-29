@@ -12,7 +12,7 @@ class WatchReceiver : BroadcastReceiver() {
             action == Intent.ACTION_USER_PRESENT ||
             action == Intent.ACTION_BOOT_COMPLETED
         ) {
-            ChangeWatch.enqueue(context)
+            ChangeWatch.onWidgetUpdated(context)
         }
     }
 }
