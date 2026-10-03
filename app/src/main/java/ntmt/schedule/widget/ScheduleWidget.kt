@@ -54,12 +54,13 @@ class ScheduleWidget : AppWidgetProvider() {
         fun refresh(context: Context, config: Configuration? = null) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget::class.java))
-            ids.forEach { render(context, manager, it, config, rebind = false) }
+            val rebind = config != null
+            ids.forEach { render(context, manager, it, config, rebind = rebind) }
             if (config != null) {
                 Handler(Looper.getMainLooper()).postDelayed({
                     val again = manager.getAppWidgetIds(ComponentName(context, ScheduleWidget::class.java))
-                    again.forEach { render(context, manager, it, config, rebind = false) }
-                }, 280)
+                    again.forEach { render(context, manager, it, config, rebind = true) }
+                }, 350)
             }
         }
 
@@ -71,8 +72,10 @@ class ScheduleWidget : AppWidgetProvider() {
             rebind: Boolean = true,
         ) {
             val st = runBlocking { Prefs(context).state.first() }
-            val night = WidgetPalette.night(context, st.theme, config)
-            val palette = WidgetPalette.resolve(context, night, st.materialYou)
+            val follow = st.theme != "light" && st.theme != "dark"
+            val day = WidgetPalette.resolve(context, false, st.materialYou)
+            val dark = WidgetPalette.resolve(context, true, st.materialYou)
+            val nightNow = WidgetPalette.night(context, st.theme, config)
             val views = RemoteViews(context.packageName, R.layout.widget_schedule)
             val open = PendingIntent.getActivity(
                 context,
@@ -85,20 +88,20 @@ class ScheduleWidget : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_body, open)
             val shade = st.widgetAlpha.coerceIn(10, 100)
-            views.setInt(R.id.widget_plate, "setColorFilter", palette.bg)
+            views.applyTone(R.id.widget_plate, "setColorFilter", day.bg, dark.bg, follow, nightNow)
             views.setInt(R.id.widget_plate, "setImageAlpha", shade * 255 / 100)
-            views.setTextColor(R.id.widget_title, palette.fg)
-            views.setTextColor(R.id.widget_sub, palette.muted)
-            views.setTextColor(R.id.widget_empty, palette.muted)
-            views.setInt(R.id.widget_swap, "setColorFilter", palette.fg)
+            views.applyTone(R.id.widget_title, "setTextColor", day.fg, dark.fg, follow, nightNow)
+            views.applyTone(R.id.widget_sub, "setTextColor", day.muted, dark.muted, follow, nightNow)
+            views.applyTone(R.id.widget_empty, "setTextColor", day.muted, dark.muted, follow, nightNow)
+            views.applyTone(R.id.widget_swap, "setColorFilter", day.fg, dark.fg, follow, nightNow)
             val widthDp = manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 220)
             if (rebind) {
                 views.setPendingIntentTemplate(R.id.widget_list, open)
                 val service = Intent(context, ScheduleWidgetService::class.java).apply {
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                    putExtra("night", palette.night)
+                    putExtra("nightNow", nightNow)
                     putExtra("widthDp", widthDp)
-                    data = Uri.parse("ntmt://widget/$id/$widthDp/${if (palette.night) 1 else 0}")
+                    data = Uri.parse("ntmt://widget/$id/$widthDp/${if (nightNow) 1 else 0}/${if (follow) 1 else 0}")
                 }
                 views.setRemoteAdapter(R.id.widget_list, service)
                 views.setEmptyView(R.id.widget_list, R.id.widget_empty)

@@ -26,7 +26,7 @@
             android:paddingEnd="6dp"
             android:paddingBottom="1dp"
             android:singleLine="true"
-            android:textColor="#1C1B1F"
+            android:textColor="@color/widget_fg"
             android:textSize="11sp" />
 
         <TextView
@@ -37,7 +37,7 @@
             android:includeFontPadding="false"
             android:maxLines="1"
             android:singleLine="true"
-            android:textColor="#1C1B1F"
+            android:textColor="@color/widget_fg"
             android:textSize="13sp" />
     </LinearLayout>
 

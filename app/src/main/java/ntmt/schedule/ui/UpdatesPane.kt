@@ -166,7 +166,7 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
                 )
                 SourceRow(
                     selected = st.updateSource != AppUpdate.SOURCE_GITHUB,
-                    title = "С сервера разработчика (если GitHub недоступен)",
+                    title = "Сервер разработчика (если GitHub недоступен)",
                     icon = null,
                     onClick = { scope.launch { prefs.setUpdateSource(AppUpdate.SOURCE_SERVER) } },
                 )

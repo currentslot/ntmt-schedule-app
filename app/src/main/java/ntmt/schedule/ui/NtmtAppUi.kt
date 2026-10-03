@@ -62,6 +62,7 @@ import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -110,8 +111,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -150,7 +157,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private enum class Tab { Today, Week, Bells, More }
+private enum class Tab { Today, Week, Bells, Cabinet, More }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -215,6 +222,7 @@ fun NtmtAppUi() {
     }
 
     LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { prefs.ensureWidgetOpen() }
         val first = prefs.state.first()
         val opened = WidgetOpen.tabs.replayCache.lastOrNull()
         tab = Tab.entries.find { it.name.equals(opened ?: first.tab, true) } ?: Tab.Today
@@ -489,23 +497,43 @@ private fun HomeScaffold(
         },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(tab == Tab.Today, { onTab(Tab.Today) }, icon = { Icon(Icons.Outlined.CalendarMonth, null) }, label = { Text("Сегодня") })
-                NavigationBarItem(tab == Tab.Week, { onTab(Tab.Week) }, icon = { Icon(Icons.Outlined.ViewWeek, null) }, label = { Text("Неделя") })
-                NavigationBarItem(tab == Tab.Bells, { onTab(Tab.Bells) }, icon = { Icon(Icons.Outlined.Notifications, null) }, label = { Text("Звонки") })
-                NavigationBarItem(tab == Tab.More, { onTab(Tab.More) }, icon = { Icon(Icons.Outlined.Settings, null) }, label = { Text("Настройки") })
+                NavigationBarItem(tab == Tab.Today, { onTab(Tab.Today) }, icon = { Icon(Icons.Outlined.CalendarMonth, null) }, label = { Text("Сегодня", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(tab == Tab.Week, { onTab(Tab.Week) }, icon = { Icon(Icons.Outlined.ViewWeek, null) }, label = { Text("Неделя", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(tab == Tab.Bells, { onTab(Tab.Bells) }, icon = { Icon(Icons.Outlined.Notifications, null) }, label = { Text("Звонки", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(tab == Tab.Cabinet, { onTab(Tab.Cabinet) }, icon = { Icon(Icons.Outlined.Person, null) }, label = { Text("Кабинет", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(tab == Tab.More, { onTab(Tab.More) }, icon = { Icon(Icons.Outlined.Settings, null) }, label = { Text("Настройки", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
             }
         },
     ) { pad ->
         val g = st.group
         val weeks = g?.let { all[it] }
         Box(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp)) {
-            when {
-                err != null -> Text(err, color = MaterialTheme.colorScheme.primary)
-                catalog == null || refreshing && all.isEmpty() -> Text("Загрузка…", modifier = Modifier.padding(24.dp))
-                tab == Tab.Today -> TodayPane(g, weeks, offset, onOffset)
-                tab == Tab.Week -> WeekPane(catalog!!, g, weeks, st.highlightWeekToday)
-                tab == Tab.Bells -> BellsPane(g, st.highlightCourse)
-                else -> MorePane(st, catalog, prefs, g, onPickGroup, onPickGroup2, onUpdates)
+            var keepCabinet by remember { mutableStateOf(false) }
+            if (tab == Tab.Cabinet) keepCabinet = true
+            if (tab != Tab.Cabinet) {
+                when {
+                    err != null -> Text(err, color = MaterialTheme.colorScheme.primary)
+                    catalog == null || refreshing && all.isEmpty() -> Text("Загрузка…", modifier = Modifier.padding(24.dp))
+                    tab == Tab.Today -> TodayPane(g, weeks, offset, onOffset)
+                    tab == Tab.Week -> WeekPane(catalog!!, g, weeks, st.highlightWeekToday)
+                    tab == Tab.Bells -> BellsPane(g, st.highlightCourse)
+                    else -> MorePane(st, catalog, prefs, g, onPickGroup, onPickGroup2, onUpdates)
+                }
+            }
+            if (keepCabinet) {
+                CabinetPane(
+                    active = tab == Tab.Cabinet,
+                    modifier = if (tab == Tab.Cabinet) Modifier.fillMaxSize() else Modifier.size(0.dp),
+                )
+            }
+            val transfer = CabinetTransfer.name
+            if (tab != Tab.Cabinet && transfer != null) {
+                DownloadNotice(
+                    name = transfer,
+                    fraction = CabinetTransfer.fraction,
+                    onCancel = { CabinetTransfer.cancel?.invoke() },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                )
             }
         }
     }
@@ -819,10 +847,27 @@ private fun MorePane(
                     )
                 }
                 if (notes) {
+                    val link = MaterialTheme.colorScheme.primary
+                    val body = MaterialTheme.colorScheme.onSurfaceVariant
                     Text(
-                        "• Добавлена адаптивная тема Material You\n• Подключен источник обновлений: GitHub\n• Исправления ошибок",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        buildAnnotatedString {
+                            append("• Реализован вход, скачивание файлов, а также управление файлами в личном кабинете ")
+                            withLink(
+                                LinkAnnotation.Url(
+                                    "https://old.ntiustu.ru/login",
+                                    TextLinkStyles(
+                                        style = SpanStyle(color = link, textDecoration = TextDecoration.None),
+                                        pressedStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
+                                        hoveredStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
+                                        focusedStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
+                                    ),
+                                ),
+                            ) {
+                                append("old.ntiustu.ru/login")
+                            }
+                            append("\n• Быстрый вход в личный кабинет по паролю, отпечатку пальца, лицу")
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(color = body),
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     )
                 }
@@ -853,7 +898,7 @@ private fun MorePane(
             if (st.morning) {
                 SettingsTap(
                     title = "Время напоминания",
-                    hint = "24 часа",
+                    hint = "Каждый день в",
                     trailing = { Text(st.morningTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
                     onClick = { timeEdit = "morning" },
                 )
@@ -884,7 +929,7 @@ private fun MorePane(
             if (st.autoRefresh) {
                 SettingsTap(
                     title = "Время автообновления",
-                    hint = "24 часа",
+                    hint = "Каждый день в",
                     trailing = { Text(st.autoRefreshTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
                     onClick = { timeEdit = "auto" },
                 )
@@ -969,7 +1014,7 @@ private fun MorePane(
             }
             Text("Открывать вкладку", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
             Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Today" to "Сегодня", "Week" to "Неделя", "Bells" to "Звонки", "More" to "Настройки").chunked(2).forEach { row ->
+                listOf("Today" to "Сегодня", "Week" to "Неделя", "Bells" to "Звонки", "Cabinet" to "Кабинет", "More" to "Настройки").chunked(2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { (id, label) ->
                             FilterChip(
@@ -1039,7 +1084,7 @@ private fun MorePane(
     }
     if (timeEdit != null) {
         TimePickDialog(
-            title = if (timeEdit == "auto") "Время автообновления" else "Время напоминания",
+            title = "Каждый день в",
             initial = if (timeEdit == "auto") st.autoRefreshTime else st.morningTime,
             onDismiss = { timeEdit = null },
             onConfirm = { v ->
@@ -1128,7 +1173,7 @@ private fun VersionMark() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Версия 1.9 Stable (63)",
+            "Версия 2.0 Stable (90)",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

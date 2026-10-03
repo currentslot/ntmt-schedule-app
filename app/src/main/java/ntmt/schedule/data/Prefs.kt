@@ -117,7 +117,8 @@ class Prefs(private val context: Context) {
             widgetPlace = if (saved[WP] == "inline") "inline" else "above",
             widgetHeader = saved[WH] ?: true,
             widgetFullDate = saved[WF] ?: false,
-            widgetOpen = normTab(saved[WO]),
+            widgetOpen = saved[WO]?.let(::normTab)
+                ?: if (saved[G] != null || saved[T] != null || saved[S] != null) "Today" else "Cabinet",
             widgetAlpha = (saved[WA] ?: 100).coerceIn(10, 100),
             updateChannel = when (saved[UC]) {
                 "beta" -> "beta"
@@ -185,6 +186,14 @@ class Prefs(private val context: Context) {
     suspend fun setWidgetPlace(v: String) = context.ds.edit { it[WP] = if (v == "inline") "inline" else "above" }
     suspend fun setWidgetHeader(v: Boolean) = context.ds.edit { it[WH] = v }
     suspend fun setWidgetFullDate(v: Boolean) = context.ds.edit { it[WF] = v }
+    suspend fun ensureWidgetOpen() {
+        context.ds.edit { saved ->
+            if (saved[WO] != null) return@edit
+            val existing = saved[G] != null || saved[T] != null || saved[S] != null
+            saved[WO] = if (existing) "Today" else "Cabinet"
+        }
+    }
+
     suspend fun setWidgetOpen(v: String) = context.ds.edit { it[WO] = normTab(v) }
     suspend fun setWidgetAlpha(v: Int) = context.ds.edit { it[WA] = v.coerceIn(10, 100) }
     suspend fun setUpdateChannel(v: String) = context.ds.edit { it[UC] = if (v == "stable") "stable" else "beta" }
@@ -218,7 +227,7 @@ class Prefs(private val context: Context) {
 private fun normLauncher(raw: String?): String = "calendar"
 
 private fun normTab(raw: String?): String = when (raw) {
-    "Week", "Bells", "More" -> raw
+    "Week", "Bells", "Cabinet", "More" -> raw
     else -> "Today"
 }
 

@@ -1,8 +1,11 @@
 package ntmt.schedule.widget
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.os.Build
+import android.widget.RemoteViews
+import ntmt.schedule.R
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -105,5 +108,56 @@ data class WidgetPalette(
                 0.7152 * ch((color shr 8) and 0xFF) +
                 0.0722 * ch(color and 0xFF)
         }
+    }
+}
+
+internal fun RemoteViews.applyTone(
+    viewId: Int,
+    method: String,
+    day: Int,
+    night: Int,
+    followSystem: Boolean,
+    nightNow: Boolean,
+) {
+    if (followSystem && Build.VERSION.SDK_INT >= 31) {
+        setColorInt(viewId, method, day, night)
+    } else {
+        val color = if (nightNow) night else day
+        if (method == "setTextColor") setTextColor(viewId, color) else setInt(viewId, method, color)
+    }
+}
+
+internal fun RemoteViews.applyChip(
+    viewId: Int,
+    day: Int,
+    night: Int,
+    followSystem: Boolean,
+    nightNow: Boolean,
+    dynamic: Boolean,
+) {
+    if ((dynamic || followSystem) && Build.VERSION.SDK_INT >= 31) {
+        setInt(viewId, "setBackgroundResource", R.drawable.widget_pill_mask)
+        val dayColor = if (dynamic) day else 0xFFD5CED3.toInt()
+        val nightColor = if (dynamic) night else 0xFF36343B.toInt()
+        if (followSystem) {
+            setColorStateList(
+                viewId,
+                "setBackgroundTintList",
+                ColorStateList.valueOf(dayColor),
+                ColorStateList.valueOf(nightColor),
+            )
+        } else {
+            setColorStateList(
+                viewId,
+                "setBackgroundTintList",
+                ColorStateList.valueOf(if (nightNow) nightColor else dayColor),
+            )
+        }
+    } else {
+        setInt(
+            viewId,
+            "setBackgroundResource",
+            if (nightNow) R.drawable.widget_pill_dark else R.drawable.widget_pill_light,
+        )
     }
 }
