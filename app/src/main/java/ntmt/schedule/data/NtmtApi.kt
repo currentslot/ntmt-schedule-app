@@ -236,7 +236,9 @@ object NtmtApi {
                 }
             }
         }
-        return sb.toString()
+        val raw = sb.toString().toByteArray(Charsets.UTF_8)
+        val md = java.security.MessageDigest.getInstance("SHA-256").digest(raw)
+        return md.joinToString("") { "%02x".format(it) }
     }
 
     fun slotsFor(weeks: GroupWeeks, date: LocalDate): Map<String, List<Lesson>> {

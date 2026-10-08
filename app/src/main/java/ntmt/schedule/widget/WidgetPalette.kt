@@ -41,17 +41,14 @@ data class WidgetPalette(
             val classic = of(night)
             if (!materialYou || Build.VERSION.SDK_INT < 31) return classic
             return try {
-                val bg = context.getColor(if (night) android.R.color.system_neutral1_800 else android.R.color.system_accent2_100)
-                val fg = context.getColor(if (night) android.R.color.system_neutral1_50 else android.R.color.system_neutral1_900)
-                val muted = context.getColor(if (night) android.R.color.system_neutral2_200 else android.R.color.system_accent2_700)
-                val pill = context.getColor(if (night) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
-                var safeBg = opaque(bg)
+                val bg = context.getColor(if (night) android.R.color.system_accent2_800 else android.R.color.system_accent2_50)
+                val fg = context.getColor(if (night) android.R.color.system_accent2_50 else android.R.color.system_neutral1_900)
+                val muted = context.getColor(if (night) android.R.color.system_accent2_200 else android.R.color.system_accent2_700)
+                val pill = context.getColor(if (night) android.R.color.system_accent1_200 else android.R.color.system_accent1_700)
+                val safeBg = opaque(bg)
                 var safeFg = opaque(fg)
                 if (contrast(safeBg, safeFg) < 4.0) {
-                    safeFg = if (night) 0xFFF4F1F4.toInt() else 0xFF1C1B1F.toInt()
-                }
-                if (contrast(safeBg, safeFg) < 3.2) {
-                    safeBg = opaque(mix(safeBg, if (night) 0xFF000000.toInt() else 0xFFFFFFFF.toInt(), 0.5f))
+                    safeFg = if (night) 0xFFF7F2F4.toInt() else 0xFF1C1B1F.toInt()
                 }
                 val safeMuted = if (contrast(safeBg, muted) < 2.2) safeFg else opaque(muted)
                 val rawPill = opaque(pill)

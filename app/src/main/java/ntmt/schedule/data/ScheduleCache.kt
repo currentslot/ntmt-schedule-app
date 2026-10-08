@@ -3,6 +3,8 @@ package ntmt.schedule.data
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 
 object ScheduleCache {
     private const val FILE = "schedule-cache.json"
@@ -43,11 +45,21 @@ object ScheduleCache {
             g.put(name, arr)
         }
         root.put("groups", g)
-        ctx.filesDir.resolve(FILE).writeText(root.toString())
+        val dir = ctx.filesDir
+        val file = File(dir, FILE)
+        val tmp = File(dir, "$FILE.tmp")
+        writeFresh(tmp, root.toString())
+        if (file.exists() && !file.delete()) file.writeBytes(ByteArray(0))
+        if (!tmp.renameTo(file)) {
+            writeFresh(file, tmp.readText())
+            tmp.delete()
+        }
+        sweep(ctx)
     }
 
     fun load(ctx: Context): Pair<Catalog, Map<String, GroupWeeks>>? {
-        val f = ctx.filesDir.resolve(FILE)
+        sweep(ctx)
+        val f = File(ctx.filesDir, FILE)
         if (!f.exists()) return null
         return try {
             val root = JSONObject(f.readText())
@@ -76,6 +88,73 @@ object ScheduleCache {
         } catch (_: Exception) {
             null
         }
+    }
+
+    fun sweep(ctx: Context) {
+        val dir = ctx.filesDir
+        val file = File(dir, FILE)
+        if (file.exists()) {
+            val text = try {
+                file.readText()
+            } catch (_: Exception) {
+                ""
+            }
+            val whole = try {
+                JSONObject(text)
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (!whole) {
+                val last = lastObject(text)
+                if (last != null && try {
+                        JSONObject(last)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                ) writeFresh(file, last) else file.delete()
+            }
+        }
+        dir.listFiles()?.forEach { extra ->
+            if (extra.name.startsWith("schedule-cache") && extra.name != FILE) extra.delete()
+        }
+    }
+
+    private fun writeFresh(file: File, text: String) {
+        FileOutputStream(file, false).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+    }
+
+    private fun lastObject(text: String): String? {
+        var start = -1
+        var depth = 0
+        var inStr = false
+        var esc = false
+        var last: String? = null
+        for (i in text.indices) {
+            val c = text[i]
+            if (inStr) {
+                if (esc) esc = false
+                else if (c == '\\') esc = true
+                else if (c == '"') inStr = false
+                continue
+            }
+            when (c) {
+                '"' -> inStr = true
+                '{' -> {
+                    if (depth == 0) start = i
+                    depth++
+                }
+                '}' -> if (depth > 0) {
+                    depth--
+                    if (depth == 0 && start >= 0) {
+                        last = text.substring(start, i + 1)
+                        start = -1
+                    }
+                }
+            }
+        }
+        return last
     }
 
     private fun parse(arr: JSONArray): GroupWeeks {

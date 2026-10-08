@@ -11,8 +11,8 @@ android {
         applicationId = "ntmt.schedule"
         minSdk = 26
         targetSdk = 35
-        versionCode = 90
-        versionName = "2.0 Stable"
+        versionCode = 93
+        versionName = "2.0.1 Stable"
     }
     signingConfigs {
         create("release") {

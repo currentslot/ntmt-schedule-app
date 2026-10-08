@@ -69,7 +69,9 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
             val weeks = map[group] ?: return true
             val snap = NtmtApi.snapshot(weeks)
-            if (allowNotify && st.notify && st.snapshot != null && st.snapshot != snap) {
+            val prev = st.snapshot
+            val legacy = prev != null && prev.length != 64
+            if (allowNotify && st.notify && prev != null && !legacy && prev != snap) {
                 Notify.show(
                     applicationContext,
                     1,

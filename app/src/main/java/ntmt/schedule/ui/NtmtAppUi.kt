@@ -111,14 +111,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -847,27 +841,10 @@ private fun MorePane(
                     )
                 }
                 if (notes) {
-                    val link = MaterialTheme.colorScheme.primary
-                    val body = MaterialTheme.colorScheme.onSurfaceVariant
                     Text(
-                        buildAnnotatedString {
-                            append("• Реализован вход, скачивание файлов, а также управление файлами в личном кабинете ")
-                            withLink(
-                                LinkAnnotation.Url(
-                                    "https://old.ntiustu.ru/login",
-                                    TextLinkStyles(
-                                        style = SpanStyle(color = link, textDecoration = TextDecoration.None),
-                                        pressedStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
-                                        hoveredStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
-                                        focusedStyle = SpanStyle(color = link, textDecoration = TextDecoration.None),
-                                    ),
-                                ),
-                            ) {
-                                append("old.ntiustu.ru/login")
-                            }
-                            append("\n• Быстрый вход в личный кабинет по паролю, отпечатку пальца, лицу")
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(color = body),
+                        "• Старый кэш расписания больше не копится\n• Исправлен фон виджета",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     )
                 }
@@ -1130,10 +1107,15 @@ private fun EmptyPairs(today: Boolean) {
 @Composable
 private fun LinkRow(label: String, url: String, mark: String) {
     val uri = LocalUriHandler.current
+    val shape = RoundedCornerShape(16.dp)
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clickable { uri.openUri(url) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(shape)
+            .clickable { uri.openUri(url) },
     ) {
         Row(
             Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1173,7 +1155,7 @@ private fun VersionMark() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Версия 2.0 Stable (90)",
+            "Версия 2.0.1 Stable (93)",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

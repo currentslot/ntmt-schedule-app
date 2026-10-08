@@ -19,6 +19,7 @@ class NtmtApp : Application() {
         try {
             Notify.createChannels(this)
             runBlocking { Prefs(this@NtmtApp).ensureUpdateDefaults() }
+            ntmt.schedule.data.ScheduleCache.sweep(this)
             val req = PeriodicWorkRequestBuilder<ScheduleWorker>(15, TimeUnit.MINUTES).build()
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "ntmt-watch",
