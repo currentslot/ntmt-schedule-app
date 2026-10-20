@@ -50,6 +50,23 @@
                 android:src="@drawable/ic_widget_swap"
                 android:tint="@color/widget_fg"
                 android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/widget_tomorrow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/widget_pill"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:paddingStart="6dp"
+                android:paddingTop="1dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="1dp"
+                android:text="Завтра"
+                android:textColor="@color/widget_fg"
+                android:textSize="11sp"
+                android:visibility="gone" />
         </LinearLayout>
 
         <TextView

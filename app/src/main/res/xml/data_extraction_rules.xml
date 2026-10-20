@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. Вход в кабинет не переносим: без ключа Keystore он всё равно не расшифруется -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="cabinet2.vault" />
+        <exclude domain="file" path="cabinet.vault" />
+        <exclude domain="file" path="cabinet.login" />
+        <exclude domain="file" path="backup.vault" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="cabinet2.vault" />
+        <exclude domain="file" path="cabinet.vault" />
+        <exclude domain="file" path="cabinet.login" />
+        <exclude domain="file" path="backup.vault" />
+    </device-transfer>
+</data-extraction-rules>

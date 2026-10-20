@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6–11. Вход в кабинет не переносим: без ключа Keystore он всё равно не расшифруется -->
+<full-backup-content>
+    <exclude domain="file" path="cabinet2.vault" />
+    <exclude domain="file" path="cabinet.vault" />
+    <exclude domain="file" path="cabinet.login" />
+        <exclude domain="file" path="backup.vault" />
+</full-backup-content>
