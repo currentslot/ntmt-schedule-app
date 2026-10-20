@@ -6,9 +6,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -28,6 +32,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -41,34 +46,41 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.QrCode
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.ViewWeek
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -88,6 +100,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -117,6 +130,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.delay
@@ -126,6 +140,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ntmt.schedule.R
 import ntmt.schedule.data.Catalog
+import ntmt.schedule.data.FilterCache
 import ntmt.schedule.data.GroupWeeks
 import ntmt.schedule.data.Lesson
 import ntmt.schedule.data.NtmtApi
@@ -164,7 +179,10 @@ fun NtmtAppUi() {
     var picker by remember { mutableStateOf(false) }
     var pickFor by remember { mutableStateOf("group") }
     var updates by remember { mutableStateOf(false) }
+    var scanSchedule by remember { mutableStateOf<Transfer?>(null) }
+    var pickScan by remember { mutableStateOf(false) }
     var offset by remember { mutableIntStateOf(0) }
+    var boot by remember { mutableStateOf(false) }
     var catalog by remember { mutableStateOf<Catalog?>(null) }
     var all by remember { mutableStateOf<Map<String, GroupWeeks>>(emptyMap()) }
     var err by remember { mutableStateOf<String?>(null) }
@@ -175,22 +193,6 @@ fun NtmtAppUi() {
     val scope = rememberCoroutineScope()
 
     suspend fun pull() {
-        if (!withContext(Dispatchers.IO) { NtmtApi.online(ctx) }) {
-            val cached = withContext(Dispatchers.IO) { ScheduleCache.load(ctx) }
-            if (cached != null) {
-                catalog = cached.first
-                all = cached.second
-                err = null
-                stale = true
-                fetchFailed = true
-            } else if (catalog == null) {
-                err = "Нет сети"
-                fetchFailed = true
-            } else {
-                fetchFailed = true
-            }
-            return
-        }
         try {
             val loaded = withContext(Dispatchers.IO) { NtmtApi.load() }
             catalog = loaded.first
@@ -208,37 +210,52 @@ fun NtmtAppUi() {
                 err = null
                 stale = true
                 fetchFailed = true
+            } else if (catalog == null) {
+                err = if (e is java.io.IOException) "Нет сети" else (e.message ?: "Нет сети")
+                fetchFailed = true
             } else {
-                err = e.message
                 fetchFailed = true
             }
         }
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { prefs.ensureWidgetOpen() }
-        val first = prefs.state.first()
-        val opened = WidgetOpen.tabs.replayCache.lastOrNull()
-        tab = Tab.entries.find { it.name.equals(opened ?: first.tab, true) } ?: Tab.Today
-        picker = first.group == null
-        restored = true
-        val cached = withContext(Dispatchers.IO) { ScheduleCache.load(ctx) }
-        if (cached != null) {
-            catalog = cached.first
-            all = cached.second
-        }
-        launch { try { prefs.setLauncher(first.launcher) } catch (_: Exception) {} }
-        launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    UpdateAuto.run(ctx, force = true)
-                } catch (_: Exception) {
+        try {
+            withContext(Dispatchers.IO) { prefs.ensureWidgetOpen() }
+            val first = prefs.state.first()
+            val opened = WidgetOpen.tabs.replayCache.lastOrNull()
+            tab = Tab.entries.find { it.name.equals(opened ?: first.tab, true) } ?: Tab.Today
+            picker = first.group == null
+            restored = true
+            val cached = withContext(Dispatchers.IO) { ScheduleCache.load(ctx) }
+            if (cached != null) {
+                catalog = cached.first
+                all = cached.second
+                val g = first.group
+                val weeks = g?.let { all[it] }
+                if (g != null && weeks != null) offset = NtmtApi.shownOffset(g, weeks, first.showTomorrow)
+                boot = true
+            }
+            launch { try { prefs.setLauncher(first.launcher) } catch (_: Exception) {} }
+            launch {
+                withContext(Dispatchers.IO) {
+                    try {
+                        UpdateAuto.run(ctx, force = true)
+                    } catch (_: Exception) {
+                    }
                 }
             }
+            refreshing = true
+            pull()
+            refreshing = false
+            val g = first.group
+            val weeks = g?.let { all[it] }
+            if (g != null && weeks != null && offset == 0) {
+                offset = NtmtApi.shownOffset(g, weeks, first.showTomorrow)
+            }
+        } finally {
+            boot = true
         }
-        refreshing = true
-        pull()
-        refreshing = false
     }
     LaunchedEffect(Unit) {
         ntmt.schedule.UpdateOpen.events.collect { updates = true }
@@ -317,6 +334,7 @@ fun NtmtAppUi() {
                     current = if (pickFor == "group2") st.group2 else st.group,
                     title = if (pickFor == "group2") "Вторая группа" else "Группа по умолчанию",
                     allowNone = pickFor == "group2",
+                    onFetch = { if (nfcPossible(ctx, sending = false)) pickScan = true else scanSchedule = Transfer.Qr },
                     onClose = { if (st.group != null) picker = false },
                     onPick = { name ->
                         scope.launch {
@@ -329,7 +347,7 @@ fun NtmtAppUi() {
                     },
                 )
                 else -> HomeScaffold(
-                    st, prefs, catalog, all, err, refreshing, fetchFailed, tab, offset,
+                    st, prefs, catalog, all, err, refreshing, fetchFailed, tab, offset, boot,
                     updateReady = online && st.availableUpdate > AppUpdate.installedCode(ctx),
                     onTab = { go(it) },
                     onOffset = { offset = it },
@@ -337,6 +355,14 @@ fun NtmtAppUi() {
                     onPickGroup = { pickFor = "group"; picker = true },
                     onPickGroup2 = { pickFor = "group2"; picker = true },
                     onUpdates = { updates = true },
+                    onImported = { c, m ->
+                        catalog = c
+                        all = m
+                        err = null
+                        stale = false
+                        fetchFailed = false
+                        ScheduleWidget.refresh(ctx)
+                    },
                     onSwap = {
                         scope.launch {
                             prefs.swapGroups()
@@ -346,10 +372,27 @@ fun NtmtAppUi() {
                 )
             }
         }
+        if (pickScan) {
+            TransferPickDialog("Получить расписание", sending = false, onPick = { pickScan = false; scanSchedule = it }) { pickScan = false }
+        }
+        scanSchedule?.let { way ->
+            CacheReceiveDialog(
+                method = way,
+                onClose = { scanSchedule = null },
+                onImported = { c, m ->
+                    catalog = c
+                    all = m
+                    err = null
+                    stale = false
+                    fetchFailed = false
+                    ScheduleWidget.refresh(ctx)
+                },
+            )
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun HomeScaffold(
     st: PrefState,
@@ -361,6 +404,7 @@ private fun HomeScaffold(
     fetchFailed: Boolean,
     tab: Tab,
     offset: Int,
+    boot: Boolean,
     updateReady: Boolean,
     onTab: (Tab) -> Unit,
     onOffset: (Int) -> Unit,
@@ -368,26 +412,40 @@ private fun HomeScaffold(
     onPickGroup: () -> Unit,
     onPickGroup2: () -> Unit,
     onUpdates: () -> Unit,
+    onImported: (Catalog, Map<String, GroupWeeks>) -> Unit,
     onSwap: () -> Unit,
 ) {
+    // Повторное нажатие на «Кабинет» возвращает на первую страницу вкладки
+    var cabinetHome by remember { mutableIntStateOf(0) }
+    var cabinetSettings by remember { mutableIntStateOf(0) }
+    val weekFilter = remember { WeekFilter() }
+    var groupMenu by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val groups = catalog?.groups.orEmpty()
+    BackHandler(enabled = groupMenu) { groupMenu = false }
+    LaunchedEffect(tab) { groupMenu = false }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Box(Modifier.fillMaxWidth().height(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
                                 if (catalog == null) "НТМТ" else "Обновлено: ${NtmtApi.formatUpdate(catalog.updateDt)}",
                                 style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.align(Alignment.CenterStart).padding(end = 76.dp),
+                                modifier = Modifier.weight(1f),
                             )
                             if (fetchFailed) {
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.errorContainer,
-                                    modifier = Modifier.align(Alignment.CenterEnd).height(16.dp),
+                                    modifier = Modifier.padding(start = 6.dp).height(16.dp),
                                 ) {
                                     Text(
                                         "Нет сети",
@@ -398,80 +456,92 @@ private fun HomeScaffold(
                                     )
                                 }
                             }
-                        }
-                        if (st.group2 != null) {
-                            Row(
-                                Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable(onClick = onSwap)
-                                    .padding(end = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Text(st.group ?: "Группа", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Icon(Icons.Outlined.SwapHoriz, contentDescription = "Переключить группу", modifier = Modifier.size(18.dp))
+                            if (updateReady) {
+                                var showLabel by remember { mutableStateOf(!st.updateExpandedOnce) }
+                                LaunchedEffect(updateReady) {
+                                    if (st.updateExpandedOnce) {
+                                        showLabel = false
+                                        return@LaunchedEffect
+                                    }
+                                    showLabel = true
+                                    kotlinx.coroutines.delay(7_000)
+                                    showLabel = false
+                                    prefs.setUpdateExpandedOnce()
+                                }
+                                val pulse = rememberInfiniteTransition(label = "update-pulse")
+                                val glow by pulse.animateFloat(
+                                    initialValue = 0.55f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1600, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse,
+                                    ),
+                                    label = "update-glow",
+                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier
+                                        .padding(start = 6.dp)
+                                        .height(30.dp)
+                                        .animateContentSize(tween(320, easing = FastOutSlowInEasing))
+                                        .alpha(glow)
+                                        .clip(CircleShape)
+                                        .clickable(onClick = onUpdates),
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            painterResource(R.drawable.ic_system_update),
+                                            contentDescription = "Доступно обновление",
+                                            modifier = Modifier.size(15.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                        AnimatedVisibility(
+                                            visible = showLabel,
+                                            enter = fadeIn(tween(160)) + expandHorizontally(tween(280, easing = FastOutSlowInEasing)),
+                                            exit = fadeOut(tween(180)) + shrinkHorizontally(tween(320, easing = FastOutSlowInEasing)),
+                                        ) {
+                                            Text(
+                                                "Доступно обновление",
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(start = 4.dp, end = 2.dp),
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        } else {
+                        }
+                        Row(
+                            Modifier
+                                .combinedClickable(
+                                    onClick = {
+                                        if (groupMenu) groupMenu = false
+                                        else if (st.group2 != null) onSwap()
+                                    },
+                                    onLongClick = { if (groups.isNotEmpty()) groupMenu = !groupMenu },
+                                )
+                                .padding(end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             Text(st.group ?: "Группа", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (st.group2 != null) {
+                                Icon(
+                                    Icons.Outlined.SwapHoriz,
+                                    contentDescription = "Переключить группу",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                 },
                 actions = {
-                    if (updateReady) {
-                        var showLabel by remember { mutableStateOf(true) }
-                        LaunchedEffect(updateReady) {
-                            showLabel = true
-                            kotlinx.coroutines.delay(10_000)
-                            showLabel = false
-                        }
-                        val pulse = rememberInfiniteTransition(label = "update-pulse")
-                        val glow by pulse.animateFloat(
-                            initialValue = 0.55f,
-                            targetValue = 1f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1600, easing = LinearEasing),
-                                repeatMode = RepeatMode.Reverse,
-                            ),
-                            label = "update-glow",
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier
-                                .padding(end = 2.dp)
-                                .height(30.dp)
-                                .animateContentSize(tween(320, easing = FastOutSlowInEasing))
-                                .alpha(glow)
-                                .clip(CircleShape)
-                                .clickable(onClick = onUpdates),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    painterResource(R.drawable.ic_system_update),
-                                    contentDescription = "Доступно обновление",
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                                AnimatedVisibility(
-                                    visible = showLabel,
-                                    enter = fadeIn(tween(160)) + expandHorizontally(tween(280, easing = FastOutSlowInEasing)),
-                                    exit = fadeOut(tween(180)) + shrinkHorizontally(tween(320, easing = FastOutSlowInEasing)),
-                                ) {
-                                    Text(
-                                        "Доступно обновление",
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        modifier = Modifier.padding(start = 4.dp, end = 2.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
                     val spin = rememberInfiniteTransition(label = "refresh")
                     val angle by spin.animateFloat(
                         initialValue = 0f,
@@ -494,7 +564,7 @@ private fun HomeScaffold(
                 NavigationBarItem(tab == Tab.Today, { onTab(Tab.Today) }, icon = { Icon(Icons.Outlined.CalendarMonth, null) }, label = { Text("Сегодня", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
                 NavigationBarItem(tab == Tab.Week, { onTab(Tab.Week) }, icon = { Icon(Icons.Outlined.ViewWeek, null) }, label = { Text("Неделя", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
                 NavigationBarItem(tab == Tab.Bells, { onTab(Tab.Bells) }, icon = { Icon(Icons.Outlined.Notifications, null) }, label = { Text("Звонки", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
-                NavigationBarItem(tab == Tab.Cabinet, { onTab(Tab.Cabinet) }, icon = { Icon(Icons.Outlined.Person, null) }, label = { Text("Кабинет", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
+                NavigationBarItem(tab == Tab.Cabinet, { if (tab == Tab.Cabinet) cabinetHome++ else onTab(Tab.Cabinet) }, icon = { Icon(Icons.Outlined.Person, null) }, label = { Text("Кабинет", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
                 NavigationBarItem(tab == Tab.More, { onTab(Tab.More) }, icon = { Icon(Icons.Outlined.Settings, null) }, label = { Text("Настройки", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall) })
             }
         },
@@ -507,16 +577,18 @@ private fun HomeScaffold(
             if (tab != Tab.Cabinet) {
                 when {
                     err != null -> Text(err, color = MaterialTheme.colorScheme.primary)
-                    catalog == null || refreshing && all.isEmpty() -> Text("Загрузка…", modifier = Modifier.padding(24.dp))
-                    tab == Tab.Today -> TodayPane(g, weeks, offset, onOffset)
-                    tab == Tab.Week -> WeekPane(catalog!!, g, weeks, st.highlightWeekToday)
+                    catalog == null || !boot || refreshing && all.isEmpty() -> Text("Загрузка…", modifier = Modifier.padding(24.dp))
+                    tab == Tab.Today -> TodayPane(g, weeks, offset, onOffset, st.showTomorrow)
+                    tab == Tab.Week -> WeekPane(catalog!!, g, weeks, st.highlightWeekToday, weekFilter)
                     tab == Tab.Bells -> BellsPane(g, st.highlightCourse)
-                    else -> MorePane(st, catalog, prefs, g, onPickGroup, onPickGroup2, onUpdates)
+                    else -> MorePane(st, catalog, prefs, g, onPickGroup, onPickGroup2, onUpdates, onImported, onOpenCabinet = { cabinetSettings++; onTab(Tab.Cabinet) })
                 }
             }
             if (keepCabinet) {
                 CabinetPane(
                     active = tab == Tab.Cabinet,
+                    home = cabinetHome,
+                    toSettings = cabinetSettings,
                     modifier = if (tab == Tab.Cabinet) Modifier.fillMaxSize() else Modifier.size(0.dp),
                 )
             }
@@ -529,6 +601,51 @@ private fun HomeScaffold(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
                 )
             }
+            if (groupMenu) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                        ) { groupMenu = false },
+                )
+            }
+            AnimatedVisibility(
+                visible = groupMenu,
+                enter = expandVertically(tween(220, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(140)),
+                exit = shrinkVertically(tween(180, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(120)),
+                modifier = Modifier.align(Alignment.TopStart),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier.widthIn(max = 260.dp).heightIn(max = 360.dp),
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        groups.forEach { name ->
+                            Text(
+                                name,
+                                color = if (name == st.group) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        groupMenu = false
+                                        onOffset(0)
+                                        scope.launch {
+                                            prefs.setGroup(name)
+                                            ScheduleWidget.refresh(ctx)
+                                        }
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -539,6 +656,7 @@ private fun TodayPane(
     weeks: GroupWeeks?,
     offset: Int,
     setOffset: (Int) -> Unit,
+    showTomorrow: Boolean,
 ) {
     if (group == null) {
         Text("Сначала выберите группу", modifier = Modifier.padding(24.dp))
@@ -546,10 +664,25 @@ private fun TodayPane(
     }
     var drag by remember { mutableFloatStateOf(0f) }
     var tick by remember { mutableIntStateOf(0) }
+    val ctx = LocalContext.current
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
             tick++
+        }
+    }
+    var flipped by remember { mutableStateOf(offset != 0) }
+    var widgetPushed by remember { mutableStateOf(false) }
+    LaunchedEffect(showTomorrow, tick, weeks) {
+        val target = if (weeks == null) 0 else NtmtApi.shownOffset(group, weeks, showTomorrow)
+        if (target <= 0) return@LaunchedEffect
+        if (!widgetPushed) {
+            widgetPushed = true
+            ScheduleWidget.refresh(ctx)
+        }
+        if (offset == 0 && !flipped) {
+            flipped = true
+            setOffset(target)
         }
     }
     Box(
@@ -583,15 +716,38 @@ private fun TodayPane(
             val slots = weeks?.let { NtmtApi.slotsFor(it, date) }.orEmpty()
             val keys = NtmtApi.ordered(slots).map { it.first }
             val marks = if (dayOffset == 0 && tick >= 0) NtmtApi.pairMarks(group, keys) else emptyMap()
+            val auto = dayOffset > 0 && weeks != null && dayOffset == NtmtApi.shownOffset(group, weeks, showTomorrow)
+            val tomorrow = auto
             Column(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxWidth().padding(bottom = 6.dp, end = 60.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (dayOffset == 0) "Сегодня" else date.dayOfWeek.ru(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (tomorrow) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.padding(start = 8.dp),
+                            ) {
+                                Text(
+                                    if (NtmtApi.nextWeek(date)) "Следующая неделя" else "Завтра",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        if (dayOffset == 0) "Сегодня" else date.dayOfWeek.ru(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        maxLines = 1,
-                    )
-                    Text(
-                        "${date.dayOfWeek.ru()}, ${date.format(DateTimeFormatter.ofPattern("d MMMM", Locale("ru")))}",
+                        if (dayOffset == 0) {
+                            "${date.dayOfWeek.ru()}, ${date.format(DateTimeFormatter.ofPattern("d MMMM", Locale("ru")))}"
+                        } else {
+                            date.format(DateTimeFormatter.ofPattern("d MMMM", Locale("ru")))
+                        },
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -623,28 +779,191 @@ private fun TodayPane(
     }
 }
 
+private class WeekFilter {
+    var mode by mutableIntStateOf(1)
+    var teacher by mutableStateOf<String?>(null)
+    var room by mutableStateOf<String?>(null)
+    var open by mutableStateOf(false)
+    var listStamp by mutableStateOf("")
+    var lists by mutableStateOf<Map<Int, Map<String, GroupWeeks>>>(emptyMap())
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun WeekPane(catalog: Catalog, group: String?, weeks: GroupWeeks?, highlightWeekToday: Boolean) {
+private fun WeekPane(
+    catalog: Catalog,
+    group: String?,
+    weeks: GroupWeeks?,
+    highlightWeekToday: Boolean,
+    filter: WeekFilter,
+) {
+    DisposableEffect(Unit) {
+        onDispose {
+            filter.mode = 1
+            filter.teacher = null
+            filter.room = null
+            filter.open = false
+        }
+    }
     if (group == null) {
         Text("Сначала выберите группу", modifier = Modifier.padding(24.dp))
         return
     }
     var numerator by remember { mutableStateOf(catalog.weekTypeNumerator) }
     var tick by remember { mutableIntStateOf(0) }
+    var picking by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var loadErr by remember { mutableStateOf<String?>(null) }
+    val ctx = LocalContext.current
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
             tick++
         }
     }
-    val week = weeks?.getOrNull(if (numerator) 0 else 1).orEmpty()
+    LaunchedEffect(catalog.semesterId, catalog.updateDt, filter.mode) {
+        val stamp = catalog.updateDt
+        if (filter.listStamp != stamp) {
+            filter.lists = emptyMap()
+            filter.listStamp = stamp
+        }
+        val order = if (filter.mode == 1) listOf(2, 3) else listOf(filter.mode, if (filter.mode == 2) 3 else 2)
+        for (mode in order) {
+            if (filter.lists[mode] != null) continue
+            if (filter.mode == mode) {
+                loading = true
+                loadErr = null
+            }
+            val map = try {
+                val cached = withContext(Dispatchers.IO) {
+                    FilterCache.load(ctx, mode, catalog.semesterId, stamp)
+                        ?.let { got -> if (mode == 3) got.filterKeys(NtmtApi::realRoom) else got }
+                }
+                cached ?: withContext(Dispatchers.IO) {
+                    NtmtApi.loadNamed(mode, catalog.semesterId).also {
+                        FilterCache.save(ctx, mode, catalog.semesterId, stamp, it)
+                    }
+                }
+            } catch (e: Exception) {
+                if (filter.mode == mode) loadErr = e.message ?: "Не удалось загрузить"
+                null
+            }
+            if (map != null) filter.lists = filter.lists + (mode to map)
+            if (filter.mode == mode) loading = false
+        }
+    }
+    val picked = when (filter.mode) {
+        2 -> filter.teacher
+        3 -> filter.room
+        else -> group
+    }
+    val shown = when (filter.mode) {
+        1 -> weeks
+        else -> picked?.let { filter.lists[filter.mode]?.get(it) }
+    }
+    val week = shown?.getOrNull(if (numerator) 0 else 1).orEmpty()
     val days = NtmtApi.DAYS.take(6)
+    val pickTitle = if (filter.mode == 3) "Выбор аудитории" else "Выбор преподавателя"
+    val names = filter.lists[filter.mode]?.keys?.toList().orEmpty().filter { name ->
+        val s = name.trim()
+        s.isNotEmpty() && !s.equals("None", true) && !s.equals("null", true)
+    }
+    fun selectMode(mode: Int) {
+        if (filter.mode == mode) return
+        filter.teacher = null
+        filter.room = null
+        filter.mode = mode
+    }
     LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
             Column(Modifier.padding(bottom = 6.dp)) {
-                Text("Неделя", style = MaterialTheme.typography.headlineSmall)
-                Text("Общее расписание · ${catalog.semesterTitle}", style = MaterialTheme.typography.bodySmall)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { filter.open = !filter.open }
+                        .padding(bottom = 6.dp),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(end = 40.dp)) {
+                        Text("Неделя", style = MaterialTheme.typography.headlineSmall, maxLines = 1)
+                        Text("Общее расписание · ${catalog.semesterTitle}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Box(Modifier.align(Alignment.TopEnd).padding(top = 4.dp)) {
+                        AnimatedContent(
+                            targetState = filter.open,
+                            transitionSpec = {
+                                (fadeIn(tween(180)) + scaleIn(tween(220, easing = FastOutSlowInEasing), initialScale = 0.82f))
+                                    .togetherWith(fadeOut(tween(140)) + scaleOut(tween(160), targetScale = 0.82f))
+                            },
+                            label = "filter-icon",
+                        ) { opened ->
+                            Icon(
+                                if (opened) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.FilterAlt,
+                                contentDescription = if (opened) "Скрыть фильтр" else "Фильтр",
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = filter.open,
+                    enter = expandVertically(tween(280, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(180)),
+                    exit = shrinkVertically(tween(240, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(140)),
+                ) {
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(
+                            "Режим отображения",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            WeekChip("По группе", filter.mode == 1, false) { selectMode(1) }
+                            WeekChip("По преподавателю", filter.mode == 2, false) { selectMode(2) }
+                            WeekChip("По аудитории", filter.mode == 3, false) { selectMode(3) }
+                        }
+                        AnimatedVisibility(
+                            visible = filter.mode != 1,
+                            enter = expandVertically(tween(260, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(180)),
+                            exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(140)),
+                        ) {
+                            val shape = RoundedCornerShape(16.dp)
+                            Surface(
+                                shape = shape,
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                    .clip(shape)
+                                    .clickable(enabled = !loading && names.isNotEmpty()) { picking = true },
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(pickTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            when {
+                                                loading -> "Загрузка…"
+                                                loadErr != null -> loadErr!!
+                                                picked != null -> picked
+                                                names.isEmpty() -> "Нет данных"
+                                                else -> "Не выбрано"
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         stickyHeader {
@@ -659,7 +978,21 @@ private fun WeekPane(catalog: Catalog, group: String?, weeks: GroupWeeks?, highl
                 }
             }
         }
-        items(days) { d ->
+        if (filter.mode != 1 && (picked == null || shown == null)) {
+            item {
+                Text(
+                    when {
+                        loading -> "Загрузка…"
+                        loadErr != null -> loadErr!!
+                        picked == null -> "Выберите ${if (filter.mode == 3) "аудиторию" else "преподавателя"}"
+                        else -> "Расписание не найдено"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        } else {
+            items(days) { d ->
                 val slots = week[d].orEmpty()
                 val ordered = NtmtApi.ordered(slots)
                 val isToday = highlightWeekToday && d == catalog.todayName && numerator == catalog.weekTypeNumerator
@@ -696,7 +1029,7 @@ private fun WeekPane(catalog: Catalog, group: String?, weeks: GroupWeeks?, highl
                         if (ordered.isEmpty()) {
                             EmptyPairs(today = d == catalog.todayName && numerator == catalog.weekTypeNumerator)
                         } else {
-                            val marks = if (isToday) {
+                            val marks = if (isToday && filter.mode == 1) {
                                 tick
                                 NtmtApi.pairMarks(group, ordered.map { it.first })
                             } else emptyMap()
@@ -705,7 +1038,28 @@ private fun WeekPane(catalog: Catalog, group: String?, weeks: GroupWeeks?, highl
                     }
                 }
             }
+        }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+    if (picking) {
+        Dialog(
+            onDismissRequest = { picking = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            GroupPicker(
+                names = names,
+                current = picked,
+                title = pickTitle,
+                allowNone = false,
+                alwaysClose = true,
+                searchHint = if (filter.mode == 3) "Поиск аудитории" else "Поиск преподавателя",
+                onClose = { picking = false },
+                onPick = { name ->
+                    if (filter.mode == 3) filter.room = name else filter.teacher = name
+                    picking = false
+                },
+            )
+        }
     }
 }
 
@@ -796,298 +1150,6 @@ private fun BellCard(title: String, rows: Map<Int, String>, active: Boolean, mod
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MorePane(
-    st: PrefState,
-    catalog: Catalog?,
-    prefs: Prefs,
-    group: String?,
-    onChangeGroup: () -> Unit,
-    onChangeGroup2: () -> Unit,
-    onOpenUpdates: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    val ctx = LocalContext.current
-    var timeEdit by remember { mutableStateOf<String?>(null) }
-    var notes by remember { mutableStateOf(false) }
-    val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) sendTestNotify(ctx, group)
-    }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Text("Настройки", style = MaterialTheme.typography.headlineSmall)
-            Text("Уведомления, обновление и оформление", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
-
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        ) {
-            Column(Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing))) {
-                Row(
-                    Modifier.fillMaxWidth().clickable { notes = !notes }.padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Изменения в этой версии", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    val turn by animateFloatAsState(
-                        targetValue = if (notes) 180f else 0f,
-                        animationSpec = tween(220, easing = FastOutSlowInEasing),
-                        label = "notes",
-                    )
-                    Icon(
-                        Icons.Outlined.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.rotate(turn),
-                    )
-                }
-                if (notes) {
-                    Text(
-                        "• Старый кэш расписания больше не копится\n• Исправлен фон виджета",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    )
-                }
-            }
-        }
-
-        SettingsBlock("Приложение") {
-            SettingsTap(
-                title = "Обновления",
-                hint = buildString {
-                    append(
-                        when (st.updateSource) {
-                            "github" -> "GitHub"
-                            else -> "Сервер разработчика"
-                        },
-                    )
-                    append(" · ")
-                    append(if (st.updateChannel == "stable") "Stable" else "βeta")
-                },
-                trailing = { Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = onOpenUpdates,
-            )
-        }
-
-        SettingsBlock("Уведомления") {
-            Line("Изменения расписания", "Только уведомление, если слежение нашло правку", st.notify) { scope.launch { prefs.setNotify(it) } }
-            Line("Напоминание о парах", "В выбранное время и только в дни, когда есть пары", st.morning) { scope.launch { prefs.setMorning(it) } }
-            if (st.morning) {
-                SettingsTap(
-                    title = "Время напоминания",
-                    hint = "Каждый день в",
-                    trailing = { Text(st.morningTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
-                    onClick = { timeEdit = "morning" },
-                )
-            }
-            SettingsTap(
-                title = "Проверить уведомление",
-                hint = "Тестовое сообщение в шторке",
-                trailing = { Icon(Icons.Outlined.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = {
-                    if (Build.VERSION.SDK_INT >= 33 &&
-                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        sendTestNotify(ctx, group)
-                    }
-                },
-            )
-        }
-
-        SettingsBlock("Обновление") {
-            Line(
-                "Следить по активности",
-                "Каждые 30 минут, когда обновляется виджет или открыт рабочий стол",
-                st.liveWatch,
-            ) { scope.launch { prefs.setLiveWatch(it) } }
-            Line("Автообновление расписания", "Подтянуть пары с сайта в выбранное время", st.autoRefresh) { scope.launch { prefs.setAutoRefresh(it) } }
-            if (st.autoRefresh) {
-                SettingsTap(
-                    title = "Время автообновления",
-                    hint = "Каждый день в",
-                    trailing = { Text(st.autoRefreshTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
-                    onClick = { timeEdit = "auto" },
-                )
-            }
-        }
-
-        SettingsBlock("Персонализация") {
-            Surface(
-                color = Color.Transparent,
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onChangeGroup),
-            ) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.Outlined.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Группа по умолчанию", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(group ?: "Не выбрана", style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
-                    }
-                    Text("Сменить", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Surface(color = Color.Transparent, modifier = Modifier.fillMaxWidth().clickable(onClick = onChangeGroup2)) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.Outlined.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Вторая группа", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(st.group2 ?: "Не выбрано", style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
-                    }
-                    if (st.group2 != null) {
-                        Text(
-                            "Сбросить",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .clickable { scope.launch { prefs.setGroup2(null); ScheduleWidget.refresh(ctx) } },
-                        )
-                    }
-                    Text("Выбрать", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Line("Сетка курса", "Подсветить звонки курса по номеру группы", st.highlightCourse) { scope.launch { prefs.setHighlightCourse(it) } }
-            Line("Выделять сегодня", "Рамка дня на вкладке «Неделя»", st.highlightWeekToday) { scope.launch { prefs.setHighlightWeekToday(it) } }
-            Text("Тема", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-            Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("auto" to "Авто", "light" to "Светлая", "dark" to "Тёмная").forEach { (id, label) ->
-                    FilterChip(selected = st.theme == id, onClick = { scope.launch { prefs.setTheme(id); ScheduleWidget.refresh(ctx) } }, label = { Text(label) })
-                }
-            }
-            Line(
-                "Адаптивная тема",
-                "Material You: цвета приложения и виджета как в системе",
-                st.materialYou,
-            ) { scope.launch { prefs.setMaterialYou(it); ScheduleWidget.refresh(ctx) } }
-        }
-
-        SettingsBlock("Виджет") {
-            SwitchLine("Номер пары", st.widgetNumber) {
-                scope.launch { prefs.setWidgetNumber(it); ScheduleWidget.refresh(ctx) }
-            }
-            SwitchLine("Время пары", st.widgetShowTime) {
-                scope.launch { prefs.setWidgetShowTime(it); ScheduleWidget.refresh(ctx) }
-            }
-            if (st.widgetShowTime) {
-                Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = st.widgetTime == "full", onClick = { scope.launch { prefs.setWidgetTime("full"); ScheduleWidget.refresh(ctx) } }, label = { Text("Полное") })
-                    FilterChip(selected = st.widgetTime == "start", onClick = { scope.launch { prefs.setWidgetTime("start"); ScheduleWidget.refresh(ctx) } }, label = { Text("Начало") })
-                }
-            }
-            SwitchLine("Аудитория", st.widgetRoom) {
-                scope.launch { prefs.setWidgetRoom(it); ScheduleWidget.refresh(ctx) }
-            }
-            SwitchLine("Доп. Информация", st.widgetHeader) {
-                scope.launch { prefs.setWidgetHeader(it); ScheduleWidget.refresh(ctx) }
-            }
-            Text("Открывать вкладку", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Today" to "Сегодня", "Week" to "Неделя", "Bells" to "Звонки", "Cabinet" to "Кабинет", "More" to "Настройки").chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { (id, label) ->
-                            FilterChip(
-                                selected = st.widgetOpen == id,
-                                onClick = { scope.launch { prefs.setWidgetOpen(id); ScheduleWidget.refresh(ctx) } },
-                                label = { Text(label) },
-                            )
-                        }
-                    }
-                }
-            }
-            var alpha by remember(st.widgetAlpha) { mutableFloatStateOf(st.widgetAlpha.toFloat()) }
-            var detent by remember { mutableIntStateOf((st.widgetAlpha / 10) * 10) }
-            var lastPush by remember { mutableLongStateOf(0L) }
-            Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Прозрачность", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                    Text(
-                        "${alpha.roundToInt()}%",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
-                }
-            }
-            Slider(
-                value = alpha,
-                onValueChange = { raw ->
-                    val nearest = (raw / 10f).roundToInt() * 10
-                    val held = kotlin.math.abs(raw - nearest) < 1.4f
-                    alpha = if (held) nearest.toFloat() else raw
-                    if (held && nearest != detent) {
-                        detent = nearest
-                        val vibrator = ctx.getSystemService(Vibrator::class.java)
-                        if (Build.VERSION.SDK_INT >= 29) {
-                            vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-                        } else {
-                            vibrator?.vibrate(VibrationEffect.createOneShot(12, 40))
-                        }
-                    }
-                    val now = android.os.SystemClock.uptimeMillis()
-                    if (now - lastPush > 80) {
-                        lastPush = now
-                        val value = alpha.roundToInt()
-                        scope.launch { prefs.setWidgetAlpha(value); ScheduleWidget.refresh(ctx) }
-                    }
-                },
-                onValueChangeFinished = { scope.launch { prefs.setWidgetAlpha(alpha.roundToInt()); ScheduleWidget.refresh(ctx) } },
-                valueRange = 10f..100f,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-        }
-        LinkRow(
-            label = "Страница проекта",
-            url = "https://github.com/currentslot/ntmt-schedule-app",
-            mark = "github",
-        )
-        LinkRow(
-            label = "@currentslot",
-            url = "https://t.me/currentslot",
-            mark = "telegram",
-        )
-        VersionMark()
-    }
-    if (timeEdit != null) {
-        TimePickDialog(
-            title = "Каждый день в",
-            initial = if (timeEdit == "auto") st.autoRefreshTime else st.morningTime,
-            onDismiss = { timeEdit = null },
-            onConfirm = { v ->
-                val kind = timeEdit
-                scope.launch {
-                    if (kind == "auto") prefs.setAutoRefreshTime(v) else prefs.setMorningTime(v)
-                }
-                timeEdit = null
-            },
-        )
-    }
-}
-
-@Composable
-private fun SettingsBlock(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp, start = 12.dp),
-    )
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(content = content)
-    }
-}
-
 @Composable
 private fun EmptyPairs(today: Boolean) {
     Column(
@@ -1101,184 +1163,6 @@ private fun EmptyPairs(today: Boolean) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 6.dp),
         )
-    }
-}
-
-@Composable
-private fun LinkRow(label: String, url: String, mark: String) {
-    val uri = LocalUriHandler.current
-    val shape = RoundedCornerShape(16.dp)
-    Surface(
-        shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp)
-            .clip(shape)
-            .clickable { uri.openUri(url) },
-    ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            BrandMark(mark)
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-        }
-    }
-}
-
-@Composable
-private fun BrandMark(kind: String) {
-    val tint = MaterialTheme.colorScheme.onSurface
-    val data = if (kind == "telegram") TELEGRAM_PATH else GITHUB_PATH
-    val path = remember(kind) { androidx.compose.ui.graphics.vector.PathParser().parsePathString(data).toPath() }
-    androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
-        val s = size.minDimension / 24f
-        scale(s, s, androidx.compose.ui.geometry.Offset.Zero) {
-            drawPath(path, tint)
-        }
-    }
-}
-
-private const val GITHUB_PATH =
-    "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
-
-private const val TELEGRAM_PATH =
-    "M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"
-
-@Composable
-private fun VersionMark() {
-    Row(
-        Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "Версия 2.0.1 Stable (93)",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TelegramCalendar(Modifier.padding(start = 6.dp).size(22.dp))
-    }
-}
-
-@Composable
-private fun TelegramCalendar(modifier: Modifier = Modifier) {
-    androidx.compose.ui.viewinterop.AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            android.widget.ImageView(context).apply {
-                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                val drawable = if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    val src = android.graphics.ImageDecoder.createSource(context.assets, "emoji/calendar.webp")
-                    android.graphics.ImageDecoder.decodeDrawable(src).also { drawn ->
-                        if (drawn is android.graphics.drawable.AnimatedImageDrawable) {
-                            drawn.repeatCount = android.graphics.drawable.AnimatedImageDrawable.REPEAT_INFINITE
-                            drawn.start()
-                        }
-                    }
-                } else {
-                    null
-                }
-                setImageDrawable(drawable)
-            }
-        },
-    )
-}
-
-private fun sendTestNotify(ctx: Context, group: String?) {
-    Notify.createChannels(ctx)
-    val body = if (group.isNullOrBlank()) {
-        "Если видите это — уведомления работают."
-    } else {
-        "Группа $group. Если видите это — уведомления работают."
-    }
-    Notify.show(ctx, 90, Notify.CH_CHANGE, "Проверка уведомления", body)
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun TimePickDialog(
-    title: String,
-    initial: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    val parts = initial.split(":")
-    val state = androidx.compose.material3.rememberTimePickerState(
-        initialHour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 7,
-        initialMinute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0,
-        is24Hour = true,
-    )
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                TimePicker(state = state, modifier = Modifier.padding(top = 12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Отмена") }
-                    TextButton(onClick = {
-                        onConfirm("${state.hour.toString().padStart(2, '0')}:${state.minute.toString().padStart(2, '0')}")
-                    }) { Text("ОК") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SwitchLine(title: String, checked: Boolean, on: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        Switch(checked, on)
-    }
-}
-
-@Composable
-internal fun Line(title: String, hint: String, checked: Boolean, on: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(checked, on)
-    }
-}
-
-@Composable
-internal fun SettingsTap(title: String, hint: String, trailing: @Composable () -> Unit, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        trailing()
-    }
-}
-
-@Composable
-private fun IconPick(selected: Boolean, res: Int, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.clickable(onClick = onClick),
-    ) {
-        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(painterResource(res), label, Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)))
-            Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 6.dp))
-        }
     }
 }
 
@@ -1316,13 +1200,18 @@ private fun PairColumn(
                     }
                     Column(Modifier.padding(start = 12.dp).weight(1f)) {
                         Text("$n пара", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        NtmtApi.pairRanges(group, key).forEach { (from, to) ->
+                        val timeGroup = lessons.firstNotNullOfOrNull { presentField(it.g) } ?: group
+                        NtmtApi.pairRanges(timeGroup, key).forEach { (from, to) ->
                             Text("с $from до $to", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         lessons.forEach { l ->
                             val room = presentField(l.a)
                             val teacher = presentField(l.p)
+                            val own = presentField(l.g)
                             Text(presentField(l.n) ?: "Занятие", style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            if (own != null) {
+                                Text(own, style = MaterialTheme.typography.bodySmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                            }
                             if (room != null || teacher != null) {
                                 Row {
                                     if (room != null) {
@@ -1361,6 +1250,9 @@ private fun GroupPicker(
     current: String?,
     title: String,
     allowNone: Boolean = false,
+    alwaysClose: Boolean = false,
+    searchHint: String = "Поиск группы",
+    onFetch: (() -> Unit)? = null,
     onClose: () -> Unit,
     onPick: (String?) -> Unit,
 ) {
@@ -1371,8 +1263,21 @@ private fun GroupPicker(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(title = { Text(title) }, navigationIcon = {
-                if (current != null || allowNone) IconButton(onClick = onClose) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
+                if (current != null || allowNone || alwaysClose) IconButton(onClick = onClose) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
             })
+        },
+        bottomBar = {
+            if (onFetch != null) {
+                Button(
+                    onClick = onFetch,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).height(52.dp),
+                    shape = RoundedCornerShape(28.dp),
+                ) {
+                    Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Получить расписание")
+                }
+            }
         },
     ) { pad ->
         Column(Modifier.padding(pad)) {
@@ -1381,7 +1286,7 @@ private fun GroupPicker(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 placeholder = {
                     Text(
-                        "Поиск группы",
+                        searchHint,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
                     )
                 },

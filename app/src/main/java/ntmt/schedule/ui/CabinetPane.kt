@@ -23,6 +23,28 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.webkit.MimeTypeMap
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.SideEffect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.material.icons.outlined.Face
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Engineering
+import androidx.compose.material.icons.outlined.RocketLaunch
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -45,8 +67,9 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.QrCode
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Share
-import androidx.core.content.FileProvider
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,6 +114,8 @@ import ntmt.schedule.data.CabinetProfile
 import ntmt.schedule.data.CabinetVault
 import ntmt.schedule.data.DownloadStopped
 import ntmt.schedule.data.DownloadTicket
+import ntmt.schedule.data.Downloads
+import ntmt.schedule.data.SavedFile
 import ntmt.schedule.data.ShareEntry
 import ntmt.schedule.data.ShareHit
 import ntmt.schedule.data.SharePage
@@ -122,7 +147,7 @@ private const val SESSION_MS = 10 * 60 * 1000L
 private data class Notice(val text: String, val toFolder: Boolean = false)
 
 @Composable
-fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSize()) {
+fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modifier: Modifier = Modifier.fillMaxSize()) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
     val scope = rememberCoroutineScope()
@@ -142,7 +167,13 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
     var pages by remember { mutableStateOf<List<SharePage>>(emptyList()) }
     var crumbs by remember { mutableStateOf<List<Crumb>>(emptyList()) }
     var downloads by remember { mutableStateOf(false) }
-    var savedFiles by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var savedFiles by remember { mutableStateOf<List<SavedFile>>(emptyList()) }
+    var qrFile by remember { mutableStateOf<Pair<java.io.File, Transfer>?>(null) }
+    var pickFile by remember { mutableStateOf<java.io.File?>(null) }
+    var receiveFile by remember { mutableStateOf<Transfer?>(null) }
+    var pickReceive by remember { mutableStateOf(false) }
+    val nfcSend = remember { nfcPossible(ctx, sending = true) }
+    val nfcReceive = remember { nfcPossible(ctx, sending = false) }
     var notice by remember { mutableStateOf<Notice?>(null) }
     var toastTick by remember { mutableIntStateOf(0) }
     var ask by remember { mutableStateOf<Ask?>(null) }
@@ -151,6 +182,37 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
     var signedAt by remember { mutableLongStateOf(0L) }
     var prompt by remember { mutableIntStateOf(0) }
     var background by remember { mutableStateOf(false) }
+    val cabinetPrefs = remember { ntmt.schedule.data.Prefs(ctx) }
+    val scroll = rememberScrollState()
+    var settingsAt by remember { mutableIntStateOf(-1) }
+    var avatar by remember { mutableIntStateOf(CabinetAvatar.get(ctx)) }
+    var pickAvatar by remember { mutableStateOf(false) }
+    var askDelete by remember { mutableStateOf<SavedFile?>(null) }
+    var askForget by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf<SavedFile?>(null) }
+    // Из «Настроек»: на главную страницу кабинета и плавно к блоку настроек
+    LaunchedEffect(toSettings) {
+        if (toSettings == 0) return@LaunchedEffect
+        downloads = false
+        files = null
+        pages = emptyList()
+        crumbs = emptyList()
+        ask = null
+        val at = withTimeoutOrNull(3_000) { snapshotFlow { settingsAt }.first { it >= 0 } } ?: return@LaunchedEffect
+        delay(120)
+        scroll.animateScrollTo(at, tween(700, easing = FastOutSlowInEasing))
+    }
+    LaunchedEffect(home) {
+        if (home == 0) return@LaunchedEffect
+        downloads = false
+        files = null
+        pages = emptyList()
+        crumbs = emptyList()
+        ask = null
+        error = null
+    }
+    fun savedText(file: SavedFile): String =
+        if (file.doc != null) "Скачано в «${Downloads.folderName(ctx) ?: "папку"}»: ${file.name}" else "Скачано: ${file.name}"
     fun flash(text: String, toFolder: Boolean = false) {
         toastTick += 1
         notice = Notice(text, toFolder)
@@ -161,7 +223,26 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         if (res.resultCode == RESULT_OK) next?.invoke()
     }
 
-    fun signIn(user: String, pass: String, store: Boolean) {
+    fun unlockThen(block: () -> Unit) {
+        error = null
+        if (!CabinetLock.available(activity)) {
+            error = "На устройстве не включена блокировка экрана"
+            return
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            CabinetLock.biometric(activity, block) { error = it }
+        } else {
+            val intent = CabinetLock.credentialIntent(activity)
+            if (intent == null) {
+                error = "На устройстве не включена блокировка экрана"
+            } else {
+                pending = block
+                keyguard.launch(intent)
+            }
+        }
+    }
+
+    fun signIn(user: String, pass: String, store: Boolean, fromVault: Boolean = false) {
         if (busy) return
         busy = true
         error = null
@@ -185,11 +266,23 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                         CabinetVault.clear(ctx)
                         saved = false
                         rememberMe = false
-                    } else {
-                        CabinetVault.save(ctx, user.trim(), pass)
+                    } else if (fromVault) {
                         saved = true
                         login = user.trim()
                         password = ""
+                    } else {
+                        // Ключ хранилища открывается только после подтверждения
+                        unlockThen {
+                            if (CabinetVault.save(ctx, user.trim(), pass)) {
+                                saved = true
+                                login = user.trim()
+                                password = ""
+                            } else {
+                                error = "Не удалось запомнить вход"
+                                saved = false
+                                rememberMe = false
+                            }
+                        }
                     }
                 } else {
                     CabinetVault.clear(ctx)
@@ -197,25 +290,6 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                 }
             }.onFailure {
                 error = it.message ?: "Не удалось войти"
-            }
-        }
-    }
-
-    fun unlockThen(block: () -> Unit) {
-        error = null
-        if (!CabinetLock.available(activity)) {
-            error = "На устройстве не включена блокировка экрана"
-            return
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            CabinetLock.biometric(activity, block) { error = it }
-        } else {
-            val intent = CabinetLock.credentialIntent(activity)
-            if (intent == null) {
-                error = "На устройстве не включена блокировка экрана"
-            } else {
-                pending = block
-                keyguard.launch(intent)
             }
         }
     }
@@ -230,7 +304,7 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                 saved = false
                 error = "Сохранённый вход не найден"
             } else {
-                signIn(pair.first, pair.second, true)
+                signIn(pair.first, pair.second, true, fromVault = true)
             }
         }
     }
@@ -249,7 +323,6 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         files = null
         pages = emptyList()
         crumbs = emptyList()
-        downloads = false
         ask = null
         withContext(Dispatchers.IO) { runCatching { CabinetApi.logout() } }
         prompt += 1
@@ -279,22 +352,19 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         onDispose { life.lifecycle.removeObserver(watch) }
     }
 
-    fun savedDir(): java.io.File = java.io.File(ctx.cacheDir, "share").apply { mkdirs() }
-
     fun reloadSaved() {
-        savedFiles = savedDir().listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }.orEmpty()
+        scope.launch { savedFiles = withContext(Dispatchers.IO) { runCatching { Downloads.list(ctx) }.getOrDefault(emptyList()) } }
     }
 
-    fun alreadySaved(name: String): Boolean {
-        val clean = name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
-        if (clean.isEmpty()) return false
-        return savedDir().listFiles()?.any { it.isFile && it.name.equals(clean, true) } == true
-    }
+    fun mimeOf(name: String): String =
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
 
-    fun openSaved(file: java.io.File) {
-        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    fun openSaved(file: SavedFile) {
+        val uri = runCatching { Downloads.shareUri(ctx, file) }.getOrElse {
+            error = "Файл не найден"
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(file.name)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
             ctx.startActivity(Intent.createChooser(intent, file.name))
         } catch (_: ActivityNotFoundException) {
@@ -302,15 +372,41 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         }
     }
 
-    fun shareSaved(file: java.io.File) {
-        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "application/octet-stream"
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-        val send = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        val chooser = Intent.createChooser(send, "Поделиться").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    fun shareSaved(file: SavedFile) {
+        val mime = mimeOf(file.name)
+        val uri = runCatching { Downloads.shareUri(ctx, file) }.getOrElse {
+            error = "Файл не найден"
+            return
+        }
+        // ClipData обязательна: без неё панель «Поделиться» Android 10+ не передаёт доступ к файлу
+        // приложениям вроде Files by Google, и они не показываются среди вариантов
+        val send = Intent(Intent.ACTION_SEND)
+            .setType(mime)
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra(Intent.EXTRA_TITLE, file.name)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        send.clipData = android.content.ClipData.newUri(ctx.contentResolver, file.name, uri)
+        val chooser = Intent.createChooser(send, file.name).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         try {
             ctx.startActivity(chooser)
         } catch (_: ActivityNotFoundException) {
             error = "Нечем поделиться"
+        }
+    }
+
+    // «Сохранить в…»: системный выбор места, в том числе «Загрузки», которые видит Files by Google
+    val saveAs = rememberLauncherForActivityResult(SaveAsDocument()) { target ->
+        val file = saving
+        saving = null
+        if (target == null || file == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val input = Downloads.input(ctx, file) ?: error("no input")
+                    input.use { i -> ctx.contentResolver.openOutputStream(target, "w")!!.use { o -> i.copyTo(o, 64 * 1024) } }
+                }.isSuccess
+            }
+            if (ok) flash("Сохранено: ${file.name}") else error = "Не удалось сохранить файл"
         }
     }
 
@@ -332,8 +428,11 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                         downloads = false
                     }
                     is ShareHit.Saved -> {
+                        val where = next.dropLast(1).map { it.name }
+                        val stored = withContext(Dispatchers.IO) { runCatching { Downloads.store(ctx, hit.file, where) } }
                         reloadSaved()
-                        flash("Скачано: ${hit.file.name}")
+                        stored.onSuccess { flash(savedText(it), toFolder = true) }
+                            .onFailure { error = it.message ?: "Не удалось сохранить файл" }
                     }
                 }
             }.onFailure { error = it.message ?: "Не удалось открыть папку" }
@@ -395,11 +494,7 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
 
     fun saveRemote(url: String, name: String, more: String = "") {
         if (loadingUrl != null) return
-        if (alreadySaved(name)) {
-            reloadSaved()
-            flash("Файл уже скачан", toFolder = true)
-            return
-        }
+        val where = crumbs.map { it.name }
         val current = DownloadTicket()
         ticket = current
         loadingUrl = url
@@ -412,6 +507,19 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         var noted = 0L
         if (background) Notify.fileProgress(ctx, name, 0f)
         scope.launch {
+            val before = withContext(Dispatchers.IO) { runCatching { Downloads.findSame(ctx, name, where) }.getOrNull() }
+            if (before != null) {
+                if (ticket === current) {
+                    ticket = null
+                    loadingUrl = null
+                    loadingName = null
+                    CabinetTransfer.clear()
+                }
+                Notify.fileClear(ctx)
+                reloadSaved()
+                flash("Файл уже скачан", toFolder = true)
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     CabinetApi.open(ctx, url, name, more, onProgress = { fraction ->
@@ -437,9 +545,15 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
             result.onSuccess { hit ->
                 when (hit) {
                     is ShareHit.Saved -> {
+                        val stored = withContext(Dispatchers.IO) { runCatching { Downloads.store(ctx, hit.file, where) } }
                         reloadSaved()
-                        flash("Скачано: ${hit.file.name}", toFolder = true)
-                        if (leftApp) Notify.fileDone(ctx, hit.file.name) else Notify.fileClear(ctx)
+                        stored.onSuccess { got ->
+                            flash(savedText(got), toFolder = true)
+                            if (leftApp) Notify.fileDone(ctx, got.name) else Notify.fileClear(ctx)
+                        }.onFailure {
+                            Notify.fileClear(ctx)
+                            error = it.message ?: "Не удалось сохранить файл"
+                        }
                     }
                     is ShareHit.Dir -> {
                         Notify.fileClear(ctx)
@@ -478,7 +592,8 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         },
     ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        // Снизу такой же отступ, как между строками списка
+        Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -498,43 +613,117 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         }
         val shown = profile
         val page = files
-        val cabinetBack = shown != null && (downloads || page != null)
+        val cabinetBack = downloads || (shown != null && page != null)
         BackHandler(enabled = cabinetBack) { leaveFolder() }
-        if (shown != null && downloads) {
+        val screen: CabScreen = when {
+            downloads -> CabScreen.Downloads
+            shown != null && page != null -> CabScreen.Folder(page, crumbs)
+            shown != null -> CabScreen.Home(shown)
+            saved && !other -> CabScreen.Quick
+            else -> CabScreen.Login
+        }
+        // Переходы между экранами: вглубь — сдвиг влево, назад — вправо, остальное — плавная смена
+        AnimatedContent(
+            targetState = screen,
+            contentKey = { it.key },
+            transitionSpec = {
+                val from = initialState.depth
+                val to = targetState.depth
+                // Новый экран въезжает и проявляется за то же время, что старый уезжает
+                val move = tween<IntOffset>(340, easing = FastOutSlowInEasing)
+                val show = tween<Float>(260, delayMillis = 80)
+                val hide = tween<Float>(180)
+                when {
+                    to > from -> (slideInHorizontally(move) { it / 3 } + fadeIn(show)) togetherWith (slideOutHorizontally(move) { -it / 3 } + fadeOut(hide))
+                    to < from -> (slideInHorizontally(move) { -it / 3 } + fadeIn(show)) togetherWith (slideOutHorizontally(move) { it / 3 } + fadeOut(hide))
+                    else -> fadeIn(show) togetherWith fadeOut(hide)
+                } using SizeTransform(clip = false) { _, _ -> tween(340, easing = FastOutSlowInEasing) }
+            },
+            label = "cabinet-screen",
+        ) { target ->
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (target) {
+        CabScreen.Downloads -> {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { downloads = false }) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
-                Text("Скаченные файлы", style = MaterialTheme.typography.titleMedium)
+                Text("Скачанные файлы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            }
+            OutlinedButton(
+                onClick = { if (nfcReceive) pickReceive = true else receiveFile = Transfer.Qr },
+                modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                shape = CabShape,
+            ) {
+                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Получить файл")
             }
             if (savedFiles.isEmpty()) {
-                Text("Нет скаченных файлов", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Нет скачанных файлов", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             savedFiles.forEach { file ->
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = CabShape,
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(start = 14.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Description, contentDescription = null)
                         Text(
                             file.name,
                             style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).padding(horizontal = 10.dp).clickable { openSaved(file) },
                         )
-                        IconButton(onClick = { shareSaved(file) }) { Icon(Icons.Outlined.Share, "Поделиться") }
-                        IconButton(onClick = {
-                            file.delete()
-                            reloadSaved()
-                        }) { Icon(Icons.Outlined.Delete, "Удалить") }
+                        RowAction(Icons.Outlined.Upload, if (nfcSend) "Передать по QR или NFC" else "Передать через QR") {
+                            scope.launch {
+                                val local = withContext(Dispatchers.IO) { Downloads.localCopy(ctx, file) }
+                                when {
+                                    local == null -> error = "Не удалось прочитать файл"
+                                    nfcSend -> pickFile = local
+                                    else -> qrFile = local to Transfer.Qr
+                                }
+                            }
+                        }
+                        RowAction(Icons.Outlined.Share, "Поделиться") { shareSaved(file) }
+                        Box {
+                            var menu by remember { mutableStateOf(false) }
+                            RowAction(Icons.Outlined.MoreVert, "Ещё") { menu = true }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Сохранить в…") },
+                                    leadingIcon = { Icon(Icons.Outlined.SaveAlt, contentDescription = null) },
+                                    onClick = {
+                                        menu = false
+                                        saving = file
+                                        saveAs.launch(file.name to mimeOf(file.name))
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Удалить") },
+                                    leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                                    onClick = {
+                                        menu = false
+                                        askDelete = file
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(4.dp))
                     }
                 }
             }
-        } else if (shown != null && page != null) {
+        }
+        is CabScreen.Folder -> {
+            // Пока экран уезжает, он показывает свой снимок; та же папка берёт свежий список
+            val page = files?.takeIf { it.url == target.page.url } ?: target.page
+            // Заголовок и путь тоже из снимка, иначе уезжающий экран сразу показывает новую папку
+            val trail = target.crumbs
             fun clean(url: String) = url.trim().trimEnd('/').substringBefore("#")
             val here = clean(page.url)
             val parent = page.up?.let(::clean)
-            val been = crumbs.map { it.name.trim() }.filter { it.isNotEmpty() }.toSet()
-            val beenUrl = crumbs.map { clean(it.url) }.toSet()
+            val been = trail.map { it.name.trim() }.filter { it.isNotEmpty() }.toSet()
+            val beenUrl = trail.map { clean(it.url) }.toSet()
             val items = page.entries.filter { entry ->
                 val link = clean(entry.url)
                 if (link == here || link == parent || link in beenUrl) return@filter false
@@ -546,28 +735,28 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { leaveFolder() }) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
                 Text(
-                    crumbs.lastOrNull()?.name ?: page.title,
+                    trail.lastOrNull()?.name ?: page.title,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
             }
-            Button(
+            OutlinedButton(
                 onClick = {
                     reloadSaved()
                     downloads = true
                 },
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-            ) { Text("Скаченные файлы") }
+                modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                shape = CabShape,
+            ) { Text("Скачанные файлы") }
             Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                crumbs.forEachIndexed { index, crumb ->
+                trail.forEachIndexed { index, crumb ->
                     if (index > 0) {
                         Text(" / ", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text(
                         crumb.name,
-                        color = if (index == crumbs.lastIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (index == trail.lastIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.clickable {
                             if (index < crumbs.lastIndex && index < pages.lastIndex) {
@@ -586,9 +775,10 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                             draft = ""
                             ask = Ask.Create
                         },
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
+                        // Пока файл скачивается, действия с папкой запрещены: сервер ответит только после загрузки
+                        enabled = !busy && loadingUrl == null,
+                        modifier = Modifier.weight(1f).height(CAB_SECONDARY),
+                        shape = CabShape,
                     ) {
                         Icon(Icons.Outlined.CreateNewFolder, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -596,9 +786,9 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                     }
                     OutlinedButton(
                         onClick = { pick.launch(arrayOf("*/*")) },
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
+                        enabled = !busy && loadingUrl == null,
+                        modifier = Modifier.weight(1f).height(CAB_SECONDARY),
+                        shape = CabShape,
                     ) {
                         Icon(Icons.Outlined.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -611,18 +801,18 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
             }
             items.forEach { entry ->
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = CabShape,
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = !busy && (entry.folder || loadingUrl == null)) {
+                    modifier = Modifier.fillMaxWidth().clip(CabShape).clickable(enabled = !busy && (entry.folder || loadingUrl == null)) {
                         if (entry.folder) {
-                            loadFolder(entry.name, entry.url, crumbs + Crumb(entry.name, entry.url))
+                            loadFolder(entry.name, entry.url, trail + Crumb(entry.name, entry.url))
                         } else {
                             saveRemote(entry.url, entry.name, entry.detail)
                         }
                     },
                 ) {
                     Column {
-                        Row(Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.padding(start = 14.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 if (entry.folder) Icons.Outlined.Folder else Icons.Outlined.Description,
                                 contentDescription = null,
@@ -642,23 +832,20 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                                 }
                             }
                             if (!entry.folder) {
-                                IconButton(onClick = { saveRemote(entry.url, entry.name, entry.detail) }, enabled = !busy && loadingUrl == null) {
-                                    Icon(Icons.Outlined.Download, "Скачать")
+                                RowAction(Icons.Outlined.Download, "Скачать", enabled = !busy && loadingUrl == null) {
+                                    saveRemote(entry.url, entry.name, entry.detail)
                                 }
                             }
                             if (page.manage) {
-                                IconButton(
-                                    onClick = {
-                                        draft = entry.name
-                                        ask = Ask.Rename(entry.name, entry.folder)
-                                    },
-                                    enabled = !busy,
-                                ) { Icon(Icons.Outlined.Edit, "Переименовать") }
-                                IconButton(
-                                    onClick = { ask = Ask.Remove(entry.name, entry.folder) },
-                                    enabled = !busy,
-                                ) { Icon(Icons.Outlined.Delete, "Удалить") }
+                                RowAction(Icons.Outlined.Edit, "Переименовать", enabled = !busy && loadingUrl == null) {
+                                    draft = entry.name
+                                    ask = Ask.Rename(entry.name, entry.folder)
+                                }
+                                RowAction(Icons.Outlined.Delete, "Удалить", enabled = !busy && loadingUrl == null) {
+                                    ask = Ask.Remove(entry.name, entry.folder)
+                                }
                             }
+                            Spacer(Modifier.width(4.dp))
                         }
                         if (loadingUrl == entry.url) {
                             if (loadingFraction > 0f) {
@@ -673,15 +860,30 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                     }
                 }
             }
-        } else if (shown != null) {
+        }
+        is CabScreen.Home -> {
+            val shown = target.profile
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = CabShape,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Outlined.Person, contentDescription = null)
+                        Surface(
+                            onClick = { pickAvatar = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    CabinetAvatar.icon(avatar),
+                                    contentDescription = "Сменить значок профиля",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
                         Column {
                             Text(shown.name, style = MaterialTheme.typography.titleMedium)
                             Text(shown.login, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -690,8 +892,8 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                     Button(
                         onClick = { loadFolder("Мои файлы", SHARE_ROOT, listOf(Crumb("Мои файлы", SHARE_ROOT))) },
                         enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().height(CAB_PRIMARY),
+                        shape = CabShape,
                     ) {
                         Icon(Icons.Outlined.Folder, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
@@ -702,9 +904,9 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                             reloadSaved()
                             downloads = true
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(16.dp),
-                    ) { Text("Скаченные файлы") }
+                        modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                        shape = CabShape,
+                    ) { Text("Скачанные файлы") }
                 }
             }
             OutlinedButton(
@@ -717,19 +919,16 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                     crumbs = emptyList()
                     downloads = false
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                shape = CabShape,
             ) { Text("Выйти") }
             if (saved) {
-                TextButton(onClick = {
-                    CabinetVault.clear(ctx)
-                    saved = false
-                    rememberMe = false
-                }) { Text("Забыть вход") }
+                TextButton(onClick = { askForget = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Забыть вход") }
             }
-        } else if (saved && !other) {
+        }
+        CabScreen.Quick -> {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = CabShape,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -748,17 +947,27 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
                                     saved = false
                                     error = "Сохранённый вход не найден"
                                 } else {
-                                    signIn(pair.first, pair.second, true)
+                                    signIn(pair.first, pair.second, true, fromVault = true)
                                 }
                             }
                         },
                         enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(CAB_PRIMARY),
+                        shape = CabShape,
                     ) { Text(if (busy) "Вход…" else "Быстрый вход") }
-                    TextButton(onClick = { other = true }) { Text("Другое имя") }
+                    OutlinedButton(
+                        onClick = {
+                            reloadSaved()
+                            downloads = true
+                        },
+                        modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                        shape = CabShape,
+                    ) { Text("Скачанные файлы") }
+                    TextButton(onClick = { other = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Другое имя") }
                 }
             }
-        } else {
+        }
+        CabScreen.Login -> {
             OutlinedTextField(
                 value = login,
                 onValueChange = { login = it },
@@ -785,11 +994,33 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
             Button(
                 onClick = { signIn(login, password, rememberMe) },
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(CAB_PRIMARY),
+                shape = CabShape,
             ) { Text(if (busy) "Вход…" else "Войти") }
+            OutlinedButton(
+                onClick = {
+                    reloadSaved()
+                    downloads = true
+                },
+                modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
+                shape = CabShape,
+            ) { Text("Скачанные файлы") }
             if (saved) {
-                TextButton(onClick = { other = false }) { Text("Быстрый вход") }
+                TextButton(onClick = { other = false }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Быстрый вход") }
             }
+        }
+        }
+        }
+        }
+        // Настройки файлов живут на главной странице кабинета и доступны без входа
+        val prefState = cabinetPrefs.state.collectAsState(initial = null).value
+        if (!downloads && files == null && prefState != null) {
+            Column(Modifier.onGloballyPositioned { settingsAt = it.positionInParent().y.toInt() }) {
+                DownloadsBlock(prefState.backup)
+                BackupBlock(prefState.backup, cabinetPrefs, vaultKey = saved, inCabinet = true)
+            }
+        } else {
+            SideEffect { settingsAt = -1 }
         }
         if (error != null && profile == null) {
             Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
@@ -841,6 +1072,72 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
             null -> Unit
         }
     }
+    if (askForget) {
+        AlertDialog(
+            onDismissRequest = { askForget = false },
+            title = { Text("Забыть вход?") },
+            text = { Text("Быстрый вход и фоновые резервные копии кабинета отключатся. Чтобы вернуть их, войдите снова с галочкой «Запомнить»") },
+            confirmButton = {
+                TextButton(onClick = {
+                    askForget = false
+                    CabinetVault.clear(ctx)
+                    saved = false
+                    rememberMe = false
+                }) { Text("Забыть") }
+            },
+            dismissButton = { TextButton(onClick = { askForget = false }) { Text("Отмена") } },
+        )
+    }
+    val deleting = askDelete
+    if (deleting != null) {
+        AlertDialog(
+            onDismissRequest = { askDelete = null },
+            title = { Text("Удалить файл?") },
+            text = { Text(deleting.name) },
+            confirmButton = {
+                TextButton(onClick = {
+                    askDelete = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) { Downloads.remove(ctx, deleting) }
+                        reloadSaved()
+                    }
+                }) { Text("Удалить") }
+            },
+            dismissButton = { TextButton(onClick = { askDelete = null }) { Text("Отмена") } },
+        )
+    }
+    if (pickAvatar) {
+        AlertDialog(
+            onDismissRequest = { pickAvatar = false },
+            title = { Text("Значок профиля") },
+            text = {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    CabinetAvatar.all.forEachIndexed { index, icon ->
+                        val chosen = index == avatar
+                        Surface(
+                            onClick = {
+                                avatar = index
+                                CabinetAvatar.set(ctx, index)
+                                pickAvatar = false
+                            },
+                            shape = CircleShape,
+                            color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    icon,
+                                    contentDescription = "Значок ${index + 1}",
+                                    tint = if (chosen) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickAvatar = false }) { Text("Закрыть") } },
+        )
+    }
     val activeName = loadingName
     val onThisPage = !downloads && files?.entries?.any { it.url == loadingUrl } == true
     if (activeName != null && !onThisPage) {
@@ -888,6 +1185,26 @@ fun CabinetPane(active: Boolean = true, modifier: Modifier = Modifier.fillMaxSiz
         }
     }
     }
+    val picking = pickFile
+    if (picking != null) {
+        TransferPickDialog("Передать файл", sending = true, onPick = { pickFile = null; qrFile = picking to it }) { pickFile = null }
+    }
+    if (pickReceive) {
+        TransferPickDialog("Получить файл", sending = false, onPick = { pickReceive = false; receiveFile = it }) { pickReceive = false }
+    }
+    val sending = qrFile
+    if (sending != null) FileShareDialog(sending.first, sending.second) { qrFile = null }
+    val receiving = receiveFile
+    if (receiving != null) {
+        FileReceiveDialog(
+            method = receiving,
+            onClose = { receiveFile = null },
+            onSaved = { name ->
+                reloadSaved()
+                flash("Файл получен: $name")
+            },
+        )
+    }
 }
 
 @Composable
@@ -928,4 +1245,58 @@ internal fun DownloadNotice(
             }
         }
     }
+}
+
+/** Экран вкладки «Кабинет» со снимком данных, нужным пока экран уезжает при переходе */
+private sealed class CabScreen(val key: String, val depth: Int) {
+    data object Login : CabScreen("login", 0)
+    data object Quick : CabScreen("quick", 0)
+    class Home(val profile: CabinetProfile) : CabScreen("home", 1)
+    data object Downloads : CabScreen("downloads", 2)
+    class Folder(val page: SharePage, val crumbs: List<Crumb>) : CabScreen("folder:" + page.url.trimEnd('/'), 2 + crumbs.size)
+}
+
+// Одинаковые размеры кнопок по всему кабинету
+private val CAB_PRIMARY = 52.dp
+private val CAB_SECONDARY = 48.dp
+private val CabShape = RoundedCornerShape(16.dp)
+
+/** Значок профиля в кабинете: пять вариантов на выбор, выбор хранится на телефоне */
+private object CabinetAvatar {
+    val all = listOf(
+        Icons.Outlined.Person,
+        Icons.Outlined.Face,
+        Icons.Outlined.School,
+        Icons.Outlined.Engineering,
+        Icons.Outlined.RocketLaunch,
+    )
+
+    fun icon(index: Int) = all.getOrElse(index) { all.first() }
+
+    fun get(ctx: android.content.Context): Int =
+        ctx.getSharedPreferences("cabinet_ui", android.content.Context.MODE_PRIVATE).getInt("avatar", 0).coerceIn(0, all.lastIndex)
+
+    fun set(ctx: android.content.Context, index: Int) {
+        ctx.getSharedPreferences("cabinet_ui", android.content.Context.MODE_PRIVATE).edit().putInt("avatar", index).apply()
+    }
+}
+
+/** Компактная кнопка действия в строке файла: 36 dp вместо стандартных 48 */
+@Composable
+private fun RowAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(36.dp)) {
+        Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Создать файл в выбранном месте: имя и тип передаются при запуске */
+private class SaveAsDocument : androidx.activity.result.contract.ActivityResultContract<Pair<String, String>, android.net.Uri?>() {
+    override fun createIntent(context: android.content.Context, input: Pair<String, String>): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(input.second)
+            .putExtra(Intent.EXTRA_TITLE, input.first)
+
+    override fun parseResult(resultCode: Int, intent: Intent?): android.net.Uri? =
+        if (resultCode == android.app.Activity.RESULT_OK) intent?.data else null
 }
