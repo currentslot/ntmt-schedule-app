@@ -34,8 +34,8 @@ object AppUpdate {
     const val HOST = "https://currentslot.mikata.ru"
 
     /**
-     * Репозиторий GitHub в виде owner/name. Пока пусто — приложение не обращается к GitHub.
-     * Релиз публикуется с ветки stable или beta.
+     * Репозиторий GitHub в виде owner/name, откуда берутся релизы при источнике «GitHub».
+     * Если строку очистить, приложение не обращается к GitHub. Релиз публикуется с ветки stable или beta.
      * Имя файла: NTMT-название-versionCode.apk
      */
     const val GITHUB_REPO = "currentslot/ntmt-schedule-app"
@@ -286,7 +286,7 @@ object AppUpdate {
                     channel = safe,
                     notes = plainNotes(release.optString("body")),
                     size = asset.optLong("size"),
-                    sha256 = "",
+                    sha256 = asset.optString("digest").removePrefix("sha256:").takeIf { it.length == 64 }.orEmpty(),
                     url = url,
                 ),
                 parsed > versionCode,
@@ -336,7 +336,7 @@ object AppUpdate {
             connectTimeout = 15000
             readTimeout = 20000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "NTMT-Android")
+            setRequestProperty("User-Agent", ntmt.schedule.data.NtmtApi.USER_AGENT)
             setRequestProperty("Accept", "application/json")
         }
     }

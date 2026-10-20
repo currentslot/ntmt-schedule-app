@@ -99,7 +99,7 @@ class UpdateDownloadService : Service() {
             channel = intent.getStringExtra(EXTRA_CHANNEL).orEmpty(),
             notes = "",
             size = intent.getLongExtra(EXTRA_SIZE, 0L),
-            sha256 = "",
+            sha256 = intent.getStringExtra(EXTRA_SHA256).orEmpty(),
             url = url,
         )
         val note = note(this, release.versionName, 0)
@@ -119,6 +119,7 @@ class UpdateDownloadService : Service() {
         const val EXTRA_CODE = "code"
         const val EXTRA_SIZE = "size"
         const val EXTRA_CHANNEL = "channel"
+        const val EXTRA_SHA256 = "sha256"
         const val NOTIF = 48
         private const val CHANNEL = "update-download"
 
@@ -129,6 +130,7 @@ class UpdateDownloadService : Service() {
                 .putExtra(EXTRA_CODE, release.versionCode)
                 .putExtra(EXTRA_SIZE, release.size)
                 .putExtra(EXTRA_CHANNEL, release.channel)
+                .putExtra(EXTRA_SHA256, release.sha256)
             ContextCompat.startForegroundService(ctx, intent)
         }
 
