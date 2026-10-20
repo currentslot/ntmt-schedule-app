@@ -57,6 +57,15 @@ object ScheduleCache {
         sweep(ctx)
     }
 
+    fun import(ctx: Context, text: String): Pair<Catalog, Map<String, GroupWeeks>>? {
+        val file = File(ctx.filesDir, FILE)
+        val previous = if (file.exists()) try { file.readText() } catch (_: Exception) { null } else null
+        writeFresh(file, text)
+        val loaded = load(ctx)
+        if (loaded == null && previous != null) writeFresh(file, previous)
+        return loaded
+    }
+
     fun load(ctx: Context): Pair<Catalog, Map<String, GroupWeeks>>? {
         sweep(ctx)
         val f = File(ctx.filesDir, FILE)

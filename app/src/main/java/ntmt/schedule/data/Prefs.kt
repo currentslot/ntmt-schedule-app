@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.ds by preferencesDataStore("ntmt")
@@ -31,6 +33,7 @@ data class PrefState(
     val lastAuto: String? = null,
     val highlightCourse: Boolean = true,
     val highlightWeekToday: Boolean = true,
+    val showTomorrow: Boolean = true,
     val liveWatch: Boolean = true,
     val widgetNumber: Boolean = true,
     val widgetShowTime: Boolean = true,
@@ -51,6 +54,36 @@ data class PrefState(
     val lastLiveCheck: Long = 0L,
     val availableUpdate: Int = 0,
     val lastNotifiedUpdate: Int = 0,
+    val updateExpandedOnce: Boolean = false,
+    val backup: BackupState = BackupState(),
+)
+
+/** Папка кабинета, выбранная для резервной копии. [parent] нужен, чтобы проверить, что папка ещё есть на сервере */
+data class CabinetFolder(val url: String, val parent: String, val path: String) {
+    fun encode() = listOf(url, parent, path).joinToString("\t")
+
+    companion object {
+        fun decode(raw: String): CabinetFolder? {
+            val p = raw.split('\t')
+            if (p.size < 3 || p[0].isBlank()) return null
+            return CabinetFolder(p[0], p[1], p[2])
+        }
+    }
+}
+
+/** Настройки и итог резервного копирования учебных файлов */
+data class BackupState(
+    val on: Boolean = false,
+    val days: Int = 7,
+    val dest: String? = null,
+    val dirs: Set<String> = emptySet(),
+    val saved: Boolean = true,
+    val cabinet: Boolean = false,
+    val cabinetFolders: List<CabinetFolder> = emptyList(),
+    val lastAt: Long = 0L,
+    val last: String? = null,
+    val cabinetAt: Long = 0L,
+    val cabinetLast: String? = null,
 )
 
 class Prefs(private val context: Context) {
@@ -70,6 +103,7 @@ class Prefs(private val context: Context) {
     private val LA = stringPreferencesKey("lastAuto")
     private val HC = booleanPreferencesKey("highlightCourse")
     private val HW = booleanPreferencesKey("highlightWeekToday")
+    private val ST = booleanPreferencesKey("showTomorrow")
     private val LW = booleanPreferencesKey("liveWatch")
     private val WN = booleanPreferencesKey("widgetNumber")
     private val WST = booleanPreferencesKey("widgetShowTime")
@@ -90,6 +124,20 @@ class Prefs(private val context: Context) {
     private val LLC = longPreferencesKey("lastLiveCheck")
     private val AU = intPreferencesKey("availableUpdate")
     private val LNU = intPreferencesKey("lastNotifiedUpdate")
+    private val UEO = booleanPreferencesKey("updateExpandedOnce")
+    private val BON = booleanPreferencesKey("backupOn")
+    private val BDAYS = intPreferencesKey("backupDays")
+    private val BDEST = stringPreferencesKey("backupDest")
+    private val BDIRS = stringSetPreferencesKey("backupDirs")
+    private val BSAVED = booleanPreferencesKey("backupSaved")
+    private val BCAB = booleanPreferencesKey("backupCabinet")
+    private val BCFOLD = stringSetPreferencesKey("backupCabinetFolders")
+    private val BLAT = longPreferencesKey("backupLastAt")
+    private val BLAST = stringPreferencesKey("backupLast")
+    private val BPRINT = stringPreferencesKey("backupPrint")
+    private val BCAT = longPreferencesKey("backupCabinetAt")
+    private val BCLAST = stringPreferencesKey("backupCabinetLast")
+    private val BCPRINT = stringPreferencesKey("backupCabinetPrint")
 
     val state: Flow<PrefState> = context.ds.data.map { saved ->
         PrefState(
@@ -109,6 +157,7 @@ class Prefs(private val context: Context) {
             lastAuto = saved[LA],
             highlightCourse = saved[HC] ?: true,
             highlightWeekToday = saved[HW] ?: true,
+            showTomorrow = saved[ST] ?: true,
             liveWatch = saved[LW] ?: true,
             widgetNumber = saved[WN] ?: true,
             widgetShowTime = saved[WST] ?: true,
@@ -136,6 +185,20 @@ class Prefs(private val context: Context) {
             lastLiveCheck = saved[LLC] ?: 0L,
             availableUpdate = saved[AU] ?: 0,
             lastNotifiedUpdate = saved[LNU] ?: 0,
+            updateExpandedOnce = saved[UEO] ?: false,
+            backup = BackupState(
+                on = saved[BON] ?: false,
+                days = normDays(saved[BDAYS]),
+                dest = saved[BDEST],
+                dirs = saved[BDIRS].orEmpty(),
+                saved = saved[BSAVED] ?: true,
+                cabinet = saved[BCAB] ?: false,
+                cabinetFolders = saved[BCFOLD].orEmpty().mapNotNull(CabinetFolder::decode).sortedBy { it.path.lowercase() },
+                lastAt = saved[BLAT] ?: 0L,
+                last = saved[BLAST],
+                cabinetAt = saved[BCAT] ?: 0L,
+                cabinetLast = saved[BCLAST],
+            ),
         )
     }
 
@@ -178,6 +241,7 @@ class Prefs(private val context: Context) {
     suspend fun setLastAuto(v: String) = context.ds.edit { it[LA] = v }
     suspend fun setHighlightCourse(v: Boolean) = context.ds.edit { it[HC] = v }
     suspend fun setHighlightWeekToday(v: Boolean) = context.ds.edit { it[HW] = v }
+    suspend fun setShowTomorrow(v: Boolean) = context.ds.edit { it[ST] = v }
     suspend fun setLiveWatch(v: Boolean) = context.ds.edit { it[LW] = v }
     suspend fun setWidgetNumber(v: Boolean) = context.ds.edit { it[WN] = v }
     suspend fun setWidgetShowTime(v: Boolean) = context.ds.edit { it[WST] = v }
@@ -208,6 +272,50 @@ class Prefs(private val context: Context) {
     suspend fun setLastLiveCheck(v: Long) = context.ds.edit { it[LLC] = v }
     suspend fun setAvailableUpdate(v: Int) = context.ds.edit { it[AU] = v }
     suspend fun setLastNotifiedUpdate(v: Int) = context.ds.edit { it[LNU] = v }
+    suspend fun setUpdateExpandedOnce() = context.ds.edit { it[UEO] = true }
+
+    suspend fun setBackupOn(v: Boolean) = context.ds.edit { it[BON] = v }
+    suspend fun setBackupDays(v: Int) = context.ds.edit { it[BDAYS] = normDays(v) }
+    suspend fun setBackupDest(v: String?) = context.ds.edit {
+        if (v == null) it.remove(BDEST) else it[BDEST] = v
+        it.remove(BPRINT)
+        it.remove(BCPRINT)
+    }
+    suspend fun addBackupDir(v: String) = context.ds.edit { it[BDIRS] = it[BDIRS].orEmpty() + v; it.remove(BPRINT) }
+    suspend fun removeBackupDir(v: String) = context.ds.edit { it[BDIRS] = it[BDIRS].orEmpty() - v; it.remove(BPRINT) }
+    suspend fun setBackupSaved(v: Boolean) = context.ds.edit { it[BSAVED] = v; it.remove(BPRINT) }
+    suspend fun setBackupCabinet(v: Boolean) = context.ds.edit { it[BCAB] = v }
+    suspend fun setCabinetFolders(v: List<CabinetFolder>) = context.ds.edit {
+        it[BCFOLD] = v.map(CabinetFolder::encode).toSet()
+        it.remove(BCPRINT)
+    }
+
+    /** Убирает из выбора папки, которых больше нет на сервере */
+    suspend fun dropCabinetFolders(gone: Collection<String>) = context.ds.edit { saved ->
+        val left = saved[BCFOLD].orEmpty().filter { raw -> CabinetFolder.decode(raw)?.url !in gone }.toSet()
+        saved[BCFOLD] = left
+    }
+
+    /** Отпечаток содержимого прошлого архива: если ничего не изменилось, новый не создаётся */
+    suspend fun backupPrint(cabinet: Boolean): String? = context.ds.data.first()[if (cabinet) BCPRINT else BPRINT]
+
+    /** После удаления всех архивов: итоги и отпечатки сброшены, следующий запуск создаст архив заново */
+    suspend fun clearBackupResults() = context.ds.edit {
+        listOf(BLAT, BCAT).forEach { key -> it.remove(key) }
+        listOf(BLAST, BPRINT, BCLAST, BCPRINT).forEach { key -> it.remove(key) }
+    }
+
+    suspend fun setBackupResult(cabinet: Boolean, at: Long, summary: String, print: String?) = context.ds.edit {
+        if (cabinet) {
+            it[BCAT] = at
+            it[BCLAST] = summary
+            if (print != null) it[BCPRINT] = print
+        } else {
+            it[BLAT] = at
+            it[BLAST] = summary
+            if (print != null) it[BPRINT] = print
+        }
+    }
 
     suspend fun setLauncher(kind: String) {
         val resolved = "calendar"
@@ -225,6 +333,11 @@ class Prefs(private val context: Context) {
 }
 
 private fun normLauncher(raw: String?): String = "calendar"
+
+private fun normDays(raw: Int?): Int = when (raw) {
+    1, 30 -> raw
+    else -> 7
+}
 
 private fun normTab(raw: String?): String = when (raw) {
     "Week", "Bells", "Cabinet", "More" -> raw

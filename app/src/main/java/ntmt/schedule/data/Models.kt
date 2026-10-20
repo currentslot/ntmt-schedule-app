@@ -1,6 +1,6 @@
 package ntmt.schedule.data
 
-data class Lesson(val n: String?, val a: String?, val p: String?)
+data class Lesson(val n: String?, val a: String?, val p: String?, val g: String? = null)
 
 data class Catalog(
     val updateDt: String,

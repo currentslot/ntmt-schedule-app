@@ -58,9 +58,14 @@ object NtmtApi {
 
     fun today(): LocalDate = LocalDate.now(tz)
 
+    // Понедельник недели-числителя. От него недели чередуются без сбоя на стыке лет:
+    // в годах с 53 ISO-неделями (например, 2026) чётность номера недели сбивалась
+    private val NUMERATOR_ANCHOR: LocalDate = LocalDate.of(2026, 1, 5)
+
     fun isNumerator(date: LocalDate): Boolean {
-        val week = date.get(WeekFields.ISO.weekOfWeekBasedYear())
-        return week % 2 == 0
+        val monday = date.minusDays((date.dayOfWeek.value - 1).toLong())
+        val weeks = java.time.temporal.ChronoUnit.WEEKS.between(NUMERATOR_ANCHOR, monday)
+        return Math.floorMod(weeks, 2L) == 0L
     }
 
     fun dayName(date: LocalDate): String = DAYS[date.dayOfWeek.value - 1]
@@ -99,7 +104,7 @@ object NtmtApi {
         return if (hhRaw.isNotEmpty() && mm.isNotEmpty()) "$dd.$mo.$y ${hhRaw.padStart(2, '0')}:$mm" else "$dd.$mo.$y"
     }
 
-    fun pairMarks(group: String, keys: List<String>, now: LocalTime = LocalTime.now()): Map<String, String> {
+    fun pairMarks(group: String, keys: List<String>, now: LocalTime = LocalTime.now(tz)): Map<String, String> {
         fun mins(s: String): Int {
             val p = s.split(":")
             val h = p.getOrNull(0)?.filter { it.isDigit() }?.toIntOrNull() ?: return -1
@@ -138,7 +143,10 @@ object NtmtApi {
                 if (o.optBoolean("active")) add(o.getInt("semester_id"))
             }
         }
-        val sem = FULLTIME.first { it in active }
+        // Во время сессии очного семестра может не быть среди активных
+        val sem = FULLTIME.firstOrNull { it in active }
+            ?: active.minOrNull()
+            ?: error("На сайте нет активного семестра")
         val raw = JSONObject(get("$BASE/api/schedule/ntmt/1/1/$sem?_=${System.currentTimeMillis()}"))
         val groups = mutableMapOf<String, GroupWeeks>()
         val names = raw.keys().asSequence().toList().sorted()
@@ -155,6 +163,30 @@ object NtmtApi {
             isoWeek = today.get(WeekFields.ISO.weekOfWeekBasedYear()),
         )
         return catalog to groups
+    }
+
+    /** Сайт отдаёт среди аудиторий заглушки вроде «/», «-» или None: таких аудиторий нет */
+    fun realRoom(name: String): Boolean {
+        val s = name.trim()
+        if (s.isEmpty() || s.equals("None", true) || s.equals("null", true)) return false
+        if (s.replace(" ", "") in NO_ROOMS) return false
+        return s.any { it.isLetterOrDigit() }
+    }
+
+    /** Аудитории, которые сайт отдаёт в фильтре, но в расписании их не бывает */
+    private val NO_ROOMS = setOf("201/211")
+
+    fun loadNamed(mode: Int, semesterId: Int): Map<String, GroupWeeks> {
+        val raw = JSONObject(get("$BASE/api/schedule/ntmt/$mode/1/$semesterId?_=${System.currentTimeMillis()}"))
+        val names = raw.keys().asSequence().toList().filter { name -> mode != 3 || realRoom(name) }
+        val sorted = if (mode == 3 && names.all { it.toIntOrNull() != null }) {
+            names.sortedBy { it.toInt() }
+        } else {
+            names.sortedWith(java.text.Collator.getInstance(java.util.Locale("ru")))
+        }
+        val out = linkedMapOf<String, GroupWeeks>()
+        for (name in sorted) out[name] = parseWeeks(raw.getJSONArray(name))
+        return out
     }
 
     private fun parseWeeks(arr: JSONArray): GroupWeeks {
@@ -178,6 +210,7 @@ object NtmtApi {
                             n = jsonStr(o, "n"),
                             a = jsonStr(o, "a"),
                             p = jsonStr(o, "p"),
+                            g = jsonStr(o, "g"),
                         )
                     }
                     slots[pair] = list
@@ -212,6 +245,9 @@ object NtmtApi {
         }
     }
 
+    /** Версия в User-Agent берётся из сборки, чтобы не устаревала */
+    val USER_AGENT = "NTMT-Android/${ntmt.schedule.BuildConfig.VERSION_NAME.replace(' ', '-')} (${ntmt.schedule.BuildConfig.VERSION_CODE})"
+
     private fun get(url: String, connectMs: Int = 15000, readMs: Int = 20000): String {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = connectMs
@@ -220,7 +256,7 @@ object NtmtApi {
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Cache-Control", "no-cache")
             setRequestProperty("Pragma", "no-cache")
-            setRequestProperty("User-Agent", "NTMT-Android/1.7")
+            setRequestProperty("User-Agent", USER_AGENT)
         }
         conn.inputStream.bufferedReader().use { return it.readText() }
     }
@@ -239,6 +275,73 @@ object NtmtApi {
         val raw = sb.toString().toByteArray(Charsets.UTF_8)
         val md = java.security.MessageDigest.getInstance("SHA-256").digest(raw)
         return md.joinToString("") { "%02x".format(it) }
+    }
+
+    fun dayEndMinute(group: String, weeks: GroupWeeks, date: LocalDate = today()): Int? {
+        val ends = ordered(slotsFor(weeks, date)).mapNotNull { (key, lessons) ->
+            if (lessons.none { filled(it) }) return@mapNotNull null
+            pairRanges(group, key).mapNotNull { (_, end) -> minutes(end) }.maxOrNull()
+        }
+        return ends.maxOrNull()
+    }
+
+    fun dayOver(group: String, weeks: GroupWeeks, date: LocalDate = today(), now: LocalTime = LocalTime.now(tz)): Boolean {
+        val last = dayEndMinute(group, weeks, date) ?: return false
+        return now.hour * 60 + now.minute >= last
+    }
+
+    /**
+     * Какой день показывать с включённым «расписанием на завтра»: после последней пары следующий день,
+     * а пустое воскресенье пропускается до понедельника (в том числе, если сегодня воскресенье без пар)
+     */
+    fun shownDate(group: String, weeks: GroupWeeks, showTomorrow: Boolean, now: LocalTime = LocalTime.now(tz)): LocalDate {
+        val day = today()
+        if (!showTomorrow) return day
+        var shown = if (dayOver(group, weeks, day, now) || emptySunday(weeks, day)) day.plusDays(1) else day
+        if (shown != day && emptySunday(weeks, shown)) shown = shown.plusDays(1)
+        return shown
+    }
+
+    fun shownOffset(group: String, weeks: GroupWeeks, showTomorrow: Boolean): Int =
+        java.time.temporal.ChronoUnit.DAYS.between(today(), shownDate(group, weeks, showTomorrow)).toInt()
+
+    /** Показанный день уже на следующей неделе (суббота вечером или воскресенье → понедельник) */
+    fun nextWeek(date: LocalDate): Boolean {
+        val monday = { d: LocalDate -> d.with(java.time.DayOfWeek.MONDAY) }
+        return monday(date).isAfter(monday(today()))
+    }
+
+    private fun emptySunday(weeks: GroupWeeks, date: LocalDate): Boolean =
+        date.dayOfWeek == java.time.DayOfWeek.SUNDAY && ordered(slotsFor(weeks, date)).none { (_, lessons) -> lessons.any { filled(it) } }
+
+    fun daySummary(group: String, weeks: GroupWeeks, date: LocalDate = today()): String? {
+        val pairs = ordered(slotsFor(weeks, date)).filter { (_, lessons) -> lessons.any { filled(it) } }
+        if (pairs.isEmpty()) return null
+        val from = pairRanges(group, pairs.first().first).firstOrNull()?.first
+        val to = pairRanges(group, pairs.last().first).lastOrNull()?.second
+        val count = pairCount(pairs.size)
+        return if (from != null && to != null) "Сегодня $count, с $from до $to" else "Сегодня $count"
+    }
+
+    private fun filled(lesson: Lesson): Boolean {
+        return !lesson.n.isNullOrBlank() || !lesson.a.isNullOrBlank() || !lesson.p.isNullOrBlank()
+    }
+
+    private fun minutes(raw: String): Int? {
+        val p = raw.split(":")
+        val h = p.getOrNull(0)?.filter { it.isDigit() }?.toIntOrNull() ?: return null
+        val m = p.getOrNull(1)?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+        return h * 60 + m
+    }
+
+    private fun pairCount(n: Int): String {
+        val word = when {
+            n % 100 in 11..14 -> "пар"
+            n % 10 == 1 -> "пара"
+            n % 10 in 2..4 -> "пары"
+            else -> "пар"
+        }
+        return "$n $word"
     }
 
     fun slotsFor(weeks: GroupWeeks, date: LocalDate): Map<String, List<Lesson>> {
