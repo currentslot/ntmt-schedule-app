@@ -6,11 +6,13 @@ import android.content.res.Configuration
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import ntmt.schedule.data.Prefs
 import ntmt.schedule.notify.Notify
 import ntmt.schedule.notify.ScheduleWorker
 import ntmt.schedule.widget.ScheduleWidget
+import ntmt.schedule.widget.WidgetFlip
 import java.util.concurrent.TimeUnit
 
 class NtmtApp : Application() {
@@ -18,7 +20,11 @@ class NtmtApp : Application() {
         super.onCreate()
         try {
             Notify.createChannels(this)
-            runBlocking { Prefs(this@NtmtApp).ensureUpdateDefaults() }
+            runBlocking {
+                val prefs = Prefs(this@NtmtApp)
+                prefs.ensureUpdateDefaults()
+                ntmt.schedule.backup.Backup.schedule(this@NtmtApp, prefs.state.first().backup)
+            }
             ntmt.schedule.data.ScheduleCache.sweep(this)
             val req = PeriodicWorkRequestBuilder<ScheduleWorker>(15, TimeUnit.MINUTES).build()
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
@@ -26,6 +32,8 @@ class NtmtApp : Application() {
                 ExistingPeriodicWorkPolicy.UPDATE,
                 req,
             )
+            ScheduleWidget.refresh(this)
+            WidgetFlip.arm(this)
             registerComponentCallbacks(object : ComponentCallbacks {
                 override fun onConfigurationChanged(newConfig: Configuration) {
                     ScheduleWidget.refresh(this@NtmtApp, newConfig)
