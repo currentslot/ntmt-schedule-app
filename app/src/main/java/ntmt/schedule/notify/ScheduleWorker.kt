@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.flow.first
-import ntmt.schedule.data.GroupWeeks
 import ntmt.schedule.data.NtmtApi
 import ntmt.schedule.data.PrefState
 import ntmt.schedule.data.Prefs
@@ -18,6 +17,7 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val st = prefs.state.first()
         return try {
             if (inputData.getString("reason") == "widget") widgetTick(prefs, st) else timed(prefs, st)
+            ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
             Result.success()
         } catch (_: Exception) {
             Result.retry()
@@ -38,21 +38,24 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val group = st.group ?: return
         val now = LocalTime.now(NtmtApi.tz)
         val today = NtmtApi.today().toString()
-        val needMorning = st.morning && inWindow(now, st.morningTime) && st.lastMorning != today
-        val needAuto = st.autoRefresh && inWindow(now, st.autoRefreshTime, 20) && st.lastAuto != today
+        // Воркер просыпается раз в 15 минут и позже в режиме Doze, поэтому окно берётся с запасом
+        val needMorning = st.morning && inWindow(now, st.morningTime, CATCH_UP_MINUTES) && st.lastMorning != today
+        val needAuto = st.autoRefresh && inWindow(now, st.autoRefreshTime, CATCH_UP_MINUTES) && st.lastAuto != today
         if (!needMorning && !needAuto) return
         if (needAuto && pullSchedule(prefs, st, allowNotify = false)) prefs.setLastAuto(today)
         if (!needMorning) return
         val cached = ScheduleCache.load(applicationContext)
         val map = cached?.second
         if (map == null) return
-        if (hasPairs(group, map)) {
+        val weeks = map[group] ?: return
+        val text = NtmtApi.daySummary(group, weeks)
+        if (text != null) {
             Notify.show(
                 applicationContext,
                 2,
                 Notify.CH_MORNING,
                 "Пары · $group",
-                "Сегодня в расписании есть пары",
+                text,
             )
         }
         prefs.setLastMorning(today)
@@ -87,14 +90,8 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         }
     }
 
-    private fun hasPairs(group: String, map: Map<String, GroupWeeks>): Boolean {
-        val weeks = map[group] ?: return false
-        val slots = NtmtApi.slotsFor(weeks, NtmtApi.today())
-        return NtmtApi.ordered(slots).any { (_, lessons) ->
-            lessons.any { lesson ->
-                !lesson.n.isNullOrBlank() || !lesson.a.isNullOrBlank() || !lesson.p.isNullOrBlank()
-            }
-        }
+    private companion object {
+        const val CATCH_UP_MINUTES = 120L
     }
 
     private fun inWindow(now: LocalTime, raw: String, minutes: Long = 20): Boolean {

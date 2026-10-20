@@ -14,6 +14,7 @@ object Notify {
     const val CH_MORNING = "morning"
     const val CH_UPDATE = "updates"
     const val CH_FILE = "cabinet-file"
+    const val CH_BACKUP = "backup"
     private const val FILE_ID = 41
 
     fun createChannels(ctx: Context) {
@@ -26,6 +27,9 @@ object Notify {
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_UPDATE, "Обновления приложения", NotificationManager.IMPORTANCE_DEFAULT),
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_BACKUP, "Резервные копии", NotificationManager.IMPORTANCE_LOW),
         )
         nm.createNotificationChannel(
             NotificationChannel(CH_FILE, "Загрузка файлов", NotificationManager.IMPORTANCE_LOW).apply {
