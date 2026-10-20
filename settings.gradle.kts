@@ -1,3 +1,4 @@
+// Настройки проекта: репозитории зависимостей и модуль app
 pluginManagement {
     repositories {
         google()
