@@ -1,3 +1,4 @@
+# Ключ подписи, local.properties и результаты сборки не попадают в репозиторий
 local.properties
 *.jks
 .gradle/
