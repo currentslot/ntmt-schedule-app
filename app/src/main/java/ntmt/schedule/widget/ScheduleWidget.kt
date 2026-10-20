@@ -20,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 import ntmt.schedule.MainActivity
 import ntmt.schedule.R
 import ntmt.schedule.data.NtmtApi
+import ntmt.schedule.data.ru
 import ntmt.schedule.data.Prefs
 import ntmt.schedule.notify.ChangeWatch
 
@@ -62,6 +63,7 @@ class ScheduleWidget : AppWidgetProvider() {
                     again.forEach { render(context, manager, it, config, rebind = true) }
                 }, 350)
             }
+            WidgetFlip.arm(context)
         }
 
         private fun render(
@@ -91,6 +93,7 @@ class ScheduleWidget : AppWidgetProvider() {
             views.applyTone(R.id.widget_plate, "setColorFilter", day.bg, dark.bg, follow, nightNow)
             views.setInt(R.id.widget_plate, "setImageAlpha", shade * 255 / 100)
             views.applyTone(R.id.widget_title, "setTextColor", day.fg, dark.fg, follow, nightNow)
+            views.applyTone(R.id.widget_tomorrow, "setTextColor", day.fg, dark.fg, follow, nightNow)
             views.applyTone(R.id.widget_sub, "setTextColor", day.muted, dark.muted, follow, nightNow)
             views.applyTone(R.id.widget_empty, "setTextColor", day.muted, dark.muted, follow, nightNow)
             views.applyTone(R.id.widget_swap, "setColorFilter", day.fg, dark.fg, follow, nightNow)
@@ -116,9 +119,24 @@ class ScheduleWidget : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_empty, if (group == null) "Выберите группу" else "Нет данных")
                 views.setViewVisibility(R.id.widget_sub, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+                views.setViewVisibility(R.id.widget_tomorrow, View.GONE)
             } else {
-                val date = NtmtApi.today()
+                val date = NtmtApi.shownDate(group, weeks, st.showTomorrow)
+                val tomorrow = date != NtmtApi.today()
                 views.setTextViewText(R.id.widget_title, group)
+                if (tomorrow) {
+                    views.setViewVisibility(R.id.widget_tomorrow, View.VISIBLE)
+                    // На следующей неделе (пустое воскресенье пропущено) в пилюле название дня
+                    views.setTextViewText(R.id.widget_tomorrow, if (NtmtApi.nextWeek(date)) date.dayOfWeek.ru() else "Завтра")
+                    val dayPill = day.pillTone(shade)
+                    val nightPill = dark.pillTone(shade)
+                    views.applyChip(R.id.widget_tomorrow, dayPill, nightPill, follow, nightNow, day.dynamic || dark.dynamic)
+                    val dayFg = if (WidgetPalette.contrast(dayPill, day.fg) >= 3.0) day.fg else day.bg
+                    val nightFg = if (WidgetPalette.contrast(nightPill, dark.fg) >= 3.0) dark.fg else dark.bg
+                    views.applyTone(R.id.widget_tomorrow, "setTextColor", dayFg, nightFg, follow, nightNow)
+                } else {
+                    views.setViewVisibility(R.id.widget_tomorrow, View.GONE)
+                }
                 if (st.widgetHeader) {
                     views.setViewVisibility(R.id.widget_sub, View.VISIBLE)
                     views.setTextViewText(R.id.widget_sub, subtitle(date))

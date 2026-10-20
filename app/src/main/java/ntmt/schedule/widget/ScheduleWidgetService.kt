@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import ntmt.schedule.R
 import ntmt.schedule.data.NtmtApi
+import ntmt.schedule.data.ru
 import ntmt.schedule.data.Prefs
 import ntmt.schedule.data.PrefState
 import ntmt.schedule.data.ScheduleCache
@@ -104,9 +105,14 @@ class ScheduleWidgetService : RemoteViewsService() {
         }
 
         private fun pairRows(group: String, weeks: ntmt.schedule.data.GroupWeeks, st: PrefState): List<Line> {
-            val slots = NtmtApi.slotsFor(weeks, NtmtApi.today())
+            val date = NtmtApi.shownDate(group, weeks, st.showTomorrow)
+            val slots = NtmtApi.slotsFor(weeks, date)
             val ordered = NtmtApi.ordered(slots)
-            if (ordered.isEmpty()) return listOf(Line("", "Сегодня пар нет", true))
+            if (ordered.isEmpty()) return listOf(Line("", when {
+                date == NtmtApi.today() -> "Сегодня пар нет"
+                NtmtApi.nextWeek(date) -> "${date.dayOfWeek.ru()}: пар нет"
+                else -> "Завтра пар нет"
+            }, true))
             return ordered.flatMap { (key, lessons) ->
                 val n = NtmtApi.PAIRS.indexOf(key).let { if (it < 0) "" else "${it + 1}" }
                 val range = NtmtApi.pairRanges(group, key).firstOrNull()
