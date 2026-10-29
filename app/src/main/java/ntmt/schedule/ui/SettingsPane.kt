@@ -210,7 +210,7 @@ internal fun MorePane(
                     Modifier.fillMaxWidth().clickable { notes = !notes }.padding(horizontal = 12.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Новое в версии 2.1", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("Новое в версии 2.1.1", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     val turn by animateFloatAsState(
                         targetValue = if (notes) 180f else 0f,
                         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -224,7 +224,7 @@ internal fun MorePane(
                 }
                 if (notes) {
                     Text(
-                        "• Расписание на завтра: после последней пары и в пустое воскресенье сразу показывается следующий учебный день\n• Передача расписания и файлов по QR-кодам и NFC\n• Резервная копия учебных файлов в zip: папки кабинета и скачанные, в фоне раз в день, неделю или месяц\n• Скачанные файлы можно сохранять в выбранную папку на телефоне\n• Значок профиля в кабинете на выбор",
+                        "• Изменения расписания замечаются, даже если сайт не поменял дату обновления\n• Фильтры: совместные занятия видны у каждого преподавателя и в каждой аудитории, пустые записи убраны\n• Обновления приложения только через GitHub\n\nВ версии 2.1:\n• Расписание на завтра: после последней пары и в пустое воскресенье сразу показывается следующий учебный день\n• Передача расписания и файлов по QR-кодам и NFC\n• Резервная копия учебных файлов в zip: папки кабинета и скачанные, в фоне раз в день, неделю или месяц\n• Скачанные файлы можно сохранять в выбранную папку на телефоне\n• Значок профиля в кабинете на выбор",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
@@ -237,12 +237,7 @@ internal fun MorePane(
             SettingsTap(
                 title = "Обновления",
                 hint = buildString {
-                    append(
-                        when (st.updateSource) {
-                            "github" -> "GitHub"
-                            else -> "Сервер разработчика"
-                        },
-                    )
+                    append("GitHub")
                     append(" · ")
                     append(if (st.updateChannel == "stable") "Stable" else "βeta")
                 },
@@ -579,7 +574,7 @@ private fun VersionMark() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Версия 2.1 Stable",
+            "Версия 2.1.1 Stable",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

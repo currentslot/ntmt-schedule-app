@@ -22,6 +22,7 @@ object ScheduleCache {
                 .put("todayName", catalog.todayName)
                 .put("todayIso", catalog.todayIso)
                 .put("isoWeek", catalog.isoWeek)
+                .put("hash", catalog.hash)
                 .put("groups", JSONArray(catalog.groups)),
         )
         val g = JSONObject()
@@ -93,7 +94,8 @@ object ScheduleCache {
                 val name = keys.next()
                 groups[name] = parse(g.getJSONArray(name))
             }
-            catalog to groups
+            val hash = c.optString("hash").ifBlank { NtmtApi.contentHash(groups) }
+            catalog.copy(hash = hash) to groups
         } catch (_: Exception) {
             null
         }

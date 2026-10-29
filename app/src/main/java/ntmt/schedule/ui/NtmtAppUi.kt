@@ -202,6 +202,8 @@ fun NtmtAppUi() {
             fetchFailed = false
             ScheduleCache.save(ctx, loaded.first, loaded.second)
             ScheduleWidget.refresh(ctx)
+            // Изменения, которые уже видны в приложении, не повторяются уведомлением
+            prefs.state.first().group?.let { g -> loaded.second[g]?.let { prefs.setSnapshot(NtmtApi.snapshot(it)) } }
         } catch (e: Exception) {
             val cached = withContext(Dispatchers.IO) { ScheduleCache.load(ctx) }
             if (cached != null) {
@@ -821,8 +823,8 @@ private fun WeekPane(
             tick++
         }
     }
-    LaunchedEffect(catalog.semesterId, catalog.updateDt, filter.mode) {
-        val stamp = catalog.updateDt
+    LaunchedEffect(catalog.semesterId, catalog.stamp, filter.mode) {
+        val stamp = catalog.stamp
         if (filter.listStamp != stamp) {
             filter.lists = emptyMap()
             filter.listStamp = stamp

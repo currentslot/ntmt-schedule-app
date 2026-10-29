@@ -64,23 +64,25 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     private suspend fun pullSchedule(prefs: Prefs, st: PrefState, allowNotify: Boolean): Boolean {
         val group = st.group ?: return true
         return try {
+            // Дате на сайте верить нельзя: пары меняют и без новой даты, поэтому расписание
+            // скачивается целиком (в gzip это несколько КБ) и сравнивается по содержимому
             val cached = ScheduleCache.load(applicationContext)
-            val siteDt = NtmtApi.peekUpdateDt()
-            if (cached != null && cached.first.updateDt == siteDt) return true
             val (catalog, map) = NtmtApi.load()
-            ScheduleCache.save(applicationContext, catalog, map)
-            ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
+            if (cached == null || cached.first.stamp != catalog.stamp || cached.first.semesterId != catalog.semesterId) {
+                ScheduleCache.save(applicationContext, catalog, map)
+                ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
+            }
             val weeks = map[group] ?: return true
             val snap = NtmtApi.snapshot(weeks)
             val prev = st.snapshot
-            val legacy = prev != null && prev.length != 64
-            if (allowNotify && st.notify && prev != null && !legacy && prev != snap) {
+            if (allowNotify && st.notify && NtmtApi.snapshotCurrent(prev) && prev != snap) {
+                val sameDate = cached != null && cached.first.updateDt == catalog.updateDt
                 Notify.show(
                     applicationContext,
                     1,
                     Notify.CH_CHANGE,
                     "Расписание $group",
-                    "Обновлено на сайте ${catalog.updateDt}",
+                    if (sameDate) "Изменилось на сайте" else "Обновлено на сайте ${NtmtApi.formatUpdate(catalog.updateDt)}",
                 )
             }
             prefs.setSnapshot(snap)

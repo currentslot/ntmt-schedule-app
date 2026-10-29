@@ -45,7 +45,6 @@ data class PrefState(
     val widgetOpen: String = "Today",
     val widgetAlpha: Int = 100,
     val updateChannel: String = "stable",
-    val updateSource: String = "github",
     val updateNotify: Boolean = true,
     val updateAuto: Boolean = true,
     val updateCheckTime: String = "09:00",
@@ -115,7 +114,6 @@ class Prefs(private val context: Context) {
     private val WO = stringPreferencesKey("widgetOpen")
     private val WA = intPreferencesKey("widgetAlpha")
     private val UC = stringPreferencesKey("updateChannel")
-    private val US = stringPreferencesKey("updateSource")
     private val UN = booleanPreferencesKey("updateNotify")
     private val UA = booleanPreferencesKey("updateAuto")
     private val UCT = stringPreferencesKey("updateCheckTime")
@@ -173,10 +171,6 @@ class Prefs(private val context: Context) {
                 "beta" -> "beta"
                 else -> "stable"
             },
-            updateSource = when (saved[US]) {
-                "server" -> "server"
-                else -> "github"
-            },
             updateNotify = saved[UN] ?: true,
             updateAuto = saved[UA] ?: true,
             updateCheckTime = normTime(saved[UCT], "09:00"),
@@ -203,14 +197,16 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun ensureUpdateDefaults() = context.ds.edit { saved ->
-        if (saved[UC] != null || saved[US] != null) return@edit
+        // Источник «Сервер разработчика» убран в 2.1.1, остаётся только GitHub
+        val oldSource = stringPreferencesKey("updateSource")
+        val hadSource = saved.contains(oldSource)
+        if (hadSource) saved.remove(oldSource)
+        if (saved[UC] != null || hadSource) return@edit
         val legacy = saved.asMap().isNotEmpty()
         if (legacy) {
             saved[UC] = "beta"
-            saved[US] = "server"
         } else {
             saved[UC] = "stable"
-            saved[US] = "github"
             saved[UN] = true
             saved[UA] = true
             saved[MY] = true
@@ -261,9 +257,6 @@ class Prefs(private val context: Context) {
     suspend fun setWidgetOpen(v: String) = context.ds.edit { it[WO] = normTab(v) }
     suspend fun setWidgetAlpha(v: Int) = context.ds.edit { it[WA] = v.coerceIn(10, 100) }
     suspend fun setUpdateChannel(v: String) = context.ds.edit { it[UC] = if (v == "stable") "stable" else "beta" }
-    suspend fun setUpdateSource(v: String) = context.ds.edit {
-        it[US] = if (v == "github") "github" else "server"
-    }
     suspend fun setUpdateNotify(v: Boolean) = context.ds.edit { it[UN] = v }
     suspend fun setUpdateAuto(v: Boolean) = context.ds.edit { it[UA] = v }
     suspend fun setUpdateCheckTime(v: String) = context.ds.edit { it[UCT] = normTime(v, "09:00") }

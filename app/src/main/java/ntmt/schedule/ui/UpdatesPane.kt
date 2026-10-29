@@ -96,7 +96,7 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
         checking = true
         scope.launch {
             val found = withContext(Dispatchers.IO) {
-                AppUpdate.check(st.updateSource, st.updateChannel, versionCode)
+                AppUpdate.check(st.updateChannel, versionCode)
             }
             result = found
             if (found.newer && found.release != null) {
@@ -108,7 +108,7 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(st.updateChannel, st.updateSource) { runCheck() }
+    LaunchedEffect(st.updateChannel) { runCheck() }
     LaunchedEffect(fetch.done, fetch.error) {
         if (fetch.done) refreshSaved()
         if (!fetch.error.isNullOrBlank()) Toast.makeText(ctx, fetch.error, Toast.LENGTH_LONG).show()
@@ -148,32 +148,7 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
             modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
         )
 
-        Text("Источник", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp))
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-            Column {
-                SourceRow(
-                    selected = st.updateSource == AppUpdate.SOURCE_GITHUB,
-                    title = "GitHub",
-                    icon = {
-                        Icon(
-                            painterResource(R.drawable.ic_github),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    },
-                    onClick = { scope.launch { prefs.setUpdateSource(AppUpdate.SOURCE_GITHUB) } },
-                )
-                SourceRow(
-                    selected = st.updateSource != AppUpdate.SOURCE_GITHUB,
-                    title = "Сервер разработчика (если GitHub недоступен)",
-                    icon = null,
-                    onClick = { scope.launch { prefs.setUpdateSource(AppUpdate.SOURCE_SERVER) } },
-                )
-            }
-        }
-
-        Text("Канал", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 8.dp))
+        Text("Канал", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp))
         Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = st.updateChannel == "stable",
@@ -303,21 +278,6 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
             }
         }
     }
-    }
-}
-
-@Composable
-private fun SourceRow(selected: Boolean, title: String, icon: (@Composable () -> Unit)?, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        if (icon != null) {
-            icon()
-            Spacer(Modifier.size(8.dp))
-        }
-        Text(title, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

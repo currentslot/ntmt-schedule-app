@@ -11,6 +11,11 @@ data class Catalog(
     val todayName: String,
     val todayIso: String,
     val isoWeek: Int,
-)
+    /** Хэш содержимого: сайт может поменять пары, не меняя дату обновления */
+    val hash: String = "",
+) {
+    /** Метка версии расписания: дата с сайта и хэш содержимого */
+    val stamp: String get() = "$updateDt#$hash"
+}
 
 typealias GroupWeeks = List<Map<String, Map<String, List<Lesson>>>>

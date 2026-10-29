@@ -31,22 +31,14 @@ data class UpdateCheck(
 )
 
 object AppUpdate {
-    const val HOST = "https://currentslot.mikata.ru"
-
     /**
-     * Репозиторий GitHub в виде owner/name, откуда берутся релизы при источнике «GitHub».
+     * Репозиторий GitHub в виде owner/name, откуда берутся релизы.
      * Если строку очистить, приложение не обращается к GitHub. Релиз публикуется с ветки stable или beta.
      * Имя файла: NTMT-название-versionCode.apk
      */
     const val GITHUB_REPO = "currentslot/ntmt-schedule-app"
 
-    const val SOURCE_GITHUB = "github"
-    const val SOURCE_SERVER = "server"
     const val ERR_GITHUB_EMPTY = "github-empty"
-
-    private const val ZEALOT_STABLE = "333a40164e980bdc43d21fecf39bbf67"
-    private const val ZEALOT_BETA = "22cbe109a484fa2214888daeac4a341b"
-    private const val PACKAGE_ID = "ntmt.schedule"
 
     fun installedCode(ctx: Context): Int {
         val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -58,12 +50,7 @@ object AppUpdate {
         return ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "—"
     }
 
-    fun check(source: String, channel: String, versionCode: Int): UpdateCheck {
-        return when (source) {
-            SOURCE_GITHUB -> checkGithub(channel, versionCode)
-            else -> checkZealot(channel, versionCode)
-        }
-    }
+    fun check(channel: String, versionCode: Int): UpdateCheck = checkGithub(channel, versionCode)
 
     fun downloadedFile(ctx: Context): File? {
         val file = File(ctx.cacheDir, "updates/ntmt-update.apk")
@@ -96,119 +83,6 @@ object AppUpdate {
         return file
     }
 
-    private fun checkServer(channel: String, versionCode: Int): UpdateCheck {
-        val safe = if (channel == "stable") "stable" else "beta"
-        val link = "$HOST/api/v1/update?package=$PACKAGE_ID&channel=$safe&versionCode=$versionCode"
-        val conn = (URL(link).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 12000
-            readTimeout = 15000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) return UpdateCheck(null, false, "Не удалось проверить")
-            val json = JSONObject(text)
-            if (json.isNull("latest")) return UpdateCheck(null, false, null)
-            val o = json.getJSONObject("latest")
-            val release = AppRelease(
-                versionCode = o.getInt("versionCode"),
-                versionName = o.optString("versionName"),
-                channel = o.optString("channel", safe),
-                notes = plainNotes(o.optString("notes")),
-                size = o.optLong("size"),
-                sha256 = o.optString("sha256"),
-                url = o.optString("url"),
-            )
-            if (!release.url.startsWith("https://")) return UpdateCheck(null, false, "Не удалось проверить")
-            val newer = json.optBoolean("newer") || release.versionCode > versionCode
-            return UpdateCheck(release, newer, null)
-        } catch (_: Exception) {
-            return UpdateCheck(null, false, "Не удалось проверить")
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun checkZealot(channel: String, versionCode: Int): UpdateCheck {
-        val safe = if (channel == "stable") "stable" else "beta"
-        return checkZealotChannel(safe, versionCode)
-    }
-
-    private fun checkZealotChannel(channel: String, versionCode: Int): UpdateCheck {
-        val key = if (channel == "stable") ZEALOT_STABLE else ZEALOT_BETA
-        val encoded = java.net.URLEncoder.encode(key, Charsets.UTF_8.name())
-        val conn = open("$HOST/api/apps/versions?channel_key=$encoded")
-        try {
-            val code = conn.responseCode
-            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) return UpdateCheck(null, false, "Не удалось проверить")
-            val items = releaseItems(JSONObject(text))
-            var best: JSONObject? = null
-            var bestCode = -1
-            for (item in items) {
-                val bundle = item.optString("bundle_id")
-                if (bundle.isNotBlank() && bundle != PACKAGE_ID && bundle != "*") continue
-                val build = item.optString("build_version").toIntOrNull() ?: continue
-                if (item.optLong("size") in 1..999_999) continue
-                val url = item.optString("install_url")
-                if (!url.startsWith("https://")) continue
-                if (build > bestCode) {
-                    best = item
-                    bestCode = build
-                }
-            }
-            val item = best ?: return UpdateCheck(null, false, null)
-            return UpdateCheck(
-                AppRelease(
-                    versionCode = bestCode,
-                    versionName = item.optString("release_version").ifBlank { bestCode.toString() },
-                    channel = channel,
-                    notes = notesOf(item),
-                    size = item.optLong("size"),
-                    sha256 = "",
-                    url = item.optString("install_url"),
-                ),
-                bestCode > versionCode,
-                null,
-            )
-        } catch (_: Exception) {
-            return UpdateCheck(null, false, "Не удалось проверить")
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun notesOf(item: JSONObject): String {
-        val parts = mutableListOf<String>()
-        fun add(raw: String?) {
-            val text = plainNotes(raw.orEmpty())
-            if (text.isNotBlank()) parts += text
-        }
-        when (val raw = item.opt("changelog")) {
-            is JSONArray -> for (i in 0 until raw.length()) {
-                when (val el = raw.opt(i)) {
-                    is JSONObject -> add(el.optString("message").ifBlank { el.optString("body") }.ifBlank { el.optString("text") })
-                    is String -> add(el)
-                }
-            }
-            is JSONObject -> add(raw.optString("message").ifBlank { raw.optString("body") }.ifBlank { raw.optString("text") })
-            is String -> add(raw)
-        }
-        add(item.optString("text_changelog"))
-        add(item.optString("changelog_text"))
-        add(item.optString("release_notes"))
-        if (parts.isEmpty()) return ""
-        val kept = mutableListOf<String>()
-        for (part in parts.sortedByDescending { it.length }) {
-            if (kept.any { longer -> longer.contains(part) }) continue
-            kept += part
-        }
-        return kept.sortedBy { parts.indexOf(it) }.joinToString("\n")
-    }
-
     private fun plainNotes(raw: String): String {
         if (raw.isBlank()) return ""
         var s = raw.replace("\r\n", "\n")
@@ -237,15 +111,6 @@ object AppUpdate {
             .replace(gt, ">")
             .replace(quot, "\"")
             .replace(apos, "'")
-    }
-
-    private fun releaseItems(root: JSONObject): List<JSONObject> {
-        if (root.isNull("releases")) return emptyList()
-        return when (val raw = root.opt("releases")) {
-            is JSONArray -> (0 until raw.length()).map { raw.getJSONObject(it) }
-            is JSONObject -> listOf(raw)
-            else -> emptyList()
-        }
     }
 
     private fun checkGithub(channel: String, versionCode: Int): UpdateCheck {

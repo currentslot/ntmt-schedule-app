@@ -161,6 +161,7 @@ object NtmtApi {
             todayName = dayName(today),
             todayIso = today.toString(),
             isoWeek = today.get(WeekFields.ISO.weekOfWeekBasedYear()),
+            hash = contentHash(groups),
         )
         return catalog to groups
     }
@@ -169,23 +170,59 @@ object NtmtApi {
     fun realRoom(name: String): Boolean {
         val s = name.trim()
         if (s.isEmpty() || s.equals("None", true) || s.equals("null", true)) return false
-        if (s.replace(" ", "") in NO_ROOMS) return false
         return s.any { it.isLetterOrDigit() }
     }
 
-    /** Аудитории, которые сайт отдаёт в фильтре, но в расписании их не бывает */
-    private val NO_ROOMS = setOf("201/211")
-
     fun loadNamed(mode: Int, semesterId: Int): Map<String, GroupWeeks> {
         val raw = JSONObject(get("$BASE/api/schedule/ntmt/$mode/1/$semesterId?_=${System.currentTimeMillis()}"))
-        val names = raw.keys().asSequence().toList().filter { name -> mode != 3 || realRoom(name) }
-        val sorted = if (mode == 3 && names.all { it.toIntOrNull() != null }) {
-            names.sortedBy { it.toInt() }
+        val parsed = linkedMapOf<String, GroupWeeks>()
+        for (name in raw.keys()) parsed[name] = parseWeeks(raw.getJSONArray(name))
+        return mergeNamed(mode, parsed)
+    }
+
+    /**
+     * Совместные занятия сайт отдаёт отдельной записью: «Дейнес ОН\ Нистулина АВ», «211\107», «201/211».
+     * Такие занятия раскладываются по каждому преподавателю или аудитории, а в самом занятии
+     * остаётся полная запись, чтобы было видно второго преподавателя или вторую аудиторию.
+     * Записи без единого занятия в список не попадают.
+     */
+    fun mergeNamed(mode: Int, items: Map<String, GroupWeeks>): Map<String, GroupWeeks> {
+        val split = if (mode == 3) Regex("""[\\/]""") else Regex("""\\""")
+        val acc = linkedMapOf<String, MutableList<MutableMap<String, MutableMap<String, MutableList<Lesson>>>>>()
+        for ((full, weeks) in items) {
+            val parts = full.split(split).map { it.trim() }.filter { it.isNotEmpty() }
+            val joint = parts.size > 1
+            for (part in parts) {
+                if (mode == 3 && !realRoom(part)) continue
+                val target = acc.getOrPut(part) { mutableListOf() }
+                weeks.forEachIndexed { wi, week ->
+                    while (target.size <= wi) target += mutableMapOf()
+                    week.forEach { (day, slots) ->
+                        val dayAcc = target[wi].getOrPut(day) { mutableMapOf() }
+                        slots.forEach { (pair, lessons) ->
+                            val list = dayAcc.getOrPut(pair) { mutableListOf() }
+                            for (l in lessons) {
+                                val shown = when {
+                                    !joint -> l
+                                    mode == 3 -> l.copy(a = l.a ?: full.trim())
+                                    else -> l.copy(p = l.p ?: full.trim())
+                                }
+                                if (shown !in list) list += shown
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val kept = acc.filterValues { weeks -> weeks.any { w -> w.values.any { d -> d.values.any { it.isNotEmpty() } } } }
+        val collator = java.text.Collator.getInstance(java.util.Locale("ru"))
+        val order = if (mode == 3) {
+            compareBy<String>({ it.toIntOrNull() == null }, { it.toIntOrNull() ?: 0 }).thenComparator { a, b -> collator.compare(a, b) }
         } else {
-            names.sortedWith(java.text.Collator.getInstance(java.util.Locale("ru")))
+            Comparator<String> { a, b -> collator.compare(a, b) }
         }
         val out = linkedMapOf<String, GroupWeeks>()
-        for (name in sorted) out[name] = parseWeeks(raw.getJSONArray(name))
+        for (name in kept.keys.sortedWith(order)) out[name] = kept.getValue(name)
         return out
     }
 
@@ -229,12 +266,11 @@ object NtmtApi {
         return s
     }
 
-    fun peekUpdateDt(): String {
+    /** Единая дата обновления сайта. Пары могут поменяться и без неё, поэтому есть ещё хэш содержимого */
+    private fun fetchUpdateDt(): String {
         val body = get("$BASE/api/schedule/update_dt/nti?_=${System.currentTimeMillis()}", 8000, 8000)
         return parseUpdateDt(body)
     }
-
-    private fun fetchUpdateDt(): String = peekUpdateDt()
 
     private fun parseUpdateDt(body: String): String {
         val t = body.trim()
@@ -261,19 +297,37 @@ object NtmtApi {
         conn.inputStream.bufferedReader().use { return it.readText() }
     }
 
-    fun snapshot(weeks: GroupWeeks): String {
+    /** Снимок расписания группы для уведомлений. Префикс версии: снимки старого формата не сравниваются */
+    fun snapshot(weeks: GroupWeeks): String = SNAPSHOT_PREFIX + sha256(weeksText(weeks))
+
+    fun snapshotCurrent(snap: String?): Boolean = snap != null && snap.startsWith(SNAPSHOT_PREFIX) && snap.length == SNAPSHOT_PREFIX.length + 64
+
+    /** Хэш всего расписания: группы по алфавиту, дни и пары в одном порядке, чтобы порядок ключей JSON не влиял */
+    fun contentHash(groups: Map<String, GroupWeeks>): String {
+        val sb = StringBuilder()
+        for (name in groups.keys.sorted()) sb.append('#').append(name).append('\n').append(weeksText(groups.getValue(name)))
+        return sha256(sb.toString())
+    }
+
+    private const val SNAPSHOT_PREFIX = "2:"
+
+    private fun weeksText(weeks: GroupWeeks): String {
         val sb = StringBuilder()
         weeks.forEachIndexed { wi, week ->
-            week.forEach { (day, slots) ->
-                slots.forEach { (pair, lessons) ->
+            for (day in week.keys.sorted()) {
+                val slots = week.getValue(day)
+                for (pair in slots.keys.sorted()) {
                     sb.append(wi).append('|').append(day).append('|').append(pair).append('|')
-                    lessons.forEach { sb.append(it.n).append('/').append(it.a).append(';') }
+                    slots.getValue(pair).forEach { sb.append(it.n).append('/').append(it.a).append('/').append(it.p).append(';') }
                     sb.append('\n')
                 }
             }
         }
-        val raw = sb.toString().toByteArray(Charsets.UTF_8)
-        val md = java.security.MessageDigest.getInstance("SHA-256").digest(raw)
+        return sb.toString()
+    }
+
+    private fun sha256(text: String): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
         return md.joinToString("") { "%02x".format(it) }
     }
 

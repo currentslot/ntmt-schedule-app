@@ -6,12 +6,12 @@ import org.json.JSONObject
 import java.io.File
 
 object FilterCache {
-    fun load(ctx: Context, mode: Int, semesterId: Int, updateDt: String): Map<String, GroupWeeks>? {
+    fun load(ctx: Context, mode: Int, semesterId: Int, stamp: String): Map<String, GroupWeeks>? {
         val file = file(ctx, mode)
         if (!file.exists()) return null
         return try {
             val root = JSONObject(file.readText())
-            if (root.optInt("semesterId") != semesterId || root.optString("updateDt") != updateDt) return null
+            if (root.optInt("semesterId") != semesterId || root.optString("stamp") != stamp) return null
             val items = root.getJSONObject("items")
             val out = linkedMapOf<String, GroupWeeks>()
             val keys = items.keys()
@@ -25,12 +25,12 @@ object FilterCache {
         }
     }
 
-    fun save(ctx: Context, mode: Int, semesterId: Int, updateDt: String, items: Map<String, GroupWeeks>) {
+    fun save(ctx: Context, mode: Int, semesterId: Int, stamp: String, items: Map<String, GroupWeeks>) {
         val body = JSONObject()
         val packed = JSONObject()
         for ((name, weeks) in items) packed.put(name, writeWeeks(weeks))
         body.put("semesterId", semesterId)
-        body.put("updateDt", updateDt)
+        body.put("stamp", stamp)
         body.put("items", packed)
         val file = file(ctx, mode)
         val tmp = File(ctx.filesDir, "${file.name}.tmp")

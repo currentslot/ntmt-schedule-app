@@ -19,7 +19,7 @@ object UpdateAuto {
         if (!NtmtApi.online(app)) return
         try {
             val code = AppUpdate.installedCode(app)
-            val found = AppUpdate.check(AppUpdate.SOURCE_SERVER, st.updateChannel, code)
+            val found = AppUpdate.check(st.updateChannel, code)
             prefs.setLastUpdateCheckAt(System.currentTimeMillis())
             val release = found.release
             if (found.newer && release != null) {
