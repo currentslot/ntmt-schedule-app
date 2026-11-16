@@ -1,8 +1,26 @@
-# Ключ подписи, local.properties и результаты сборки не попадают в репозиторий
-local.properties
+# Приватные файлы: ключи подписи, пароли и настройки Firebase не попадают в репозиторий
 *.jks
-.gradle/
-.kotlin/
+*.keystore
+*.p12
+*.pem
+key.properties*
+local.properties
+app/google-services.json
+ntmt-new-key/
+
+# Результаты сборки
+*.apk
+*.aab
+*.zip
 build/
 app/build/
-*.apk
+.gradle/
+.kotlin/
+
+# Android Studio и системные файлы
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
