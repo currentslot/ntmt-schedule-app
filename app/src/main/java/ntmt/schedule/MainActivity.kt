@@ -43,12 +43,35 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             paintWindow("auto", true)
         }
+        smoothDisplay()
         setContent { NtmtAppUi() }
         if (Build.VERSION.SDK_INT >= 33) {
             try {
                 ask.launch(Manifest.permission.POST_NOTIFICATIONS)
             } catch (_: Exception) {
             }
+        }
+    }
+
+    /**
+     * Экраны на 90/120 Гц: просим у системы режим с самой высокой частотой при текущем разрешении.
+     * Без этого часть прошивок держит приложение на 60 Гц, и прокрутка с анимациями идут рывками
+     */
+    private fun smoothDisplay() {
+        try {
+            // Pixel сам переключает частоту (Smooth Display): принудительный режим там только мешает
+            if (Build.MANUFACTURER.equals("Google", ignoreCase = true)) return
+            val screen = if (Build.VERSION.SDK_INT >= 30) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
+            val now = screen?.mode ?: return
+            val best = screen.supportedModes
+                .filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
+                .maxByOrNull { it.refreshRate } ?: return
+            val params = window.attributes
+            params.preferredDisplayModeId = best.modeId
+            params.preferredRefreshRate = best.refreshRate
+            window.attributes = params
+        } catch (_: Exception) {
+            // нестандартная прошивка: остаётся частота по умолчанию
         }
     }
 
@@ -62,9 +85,9 @@ class MainActivity : ComponentActivity() {
         val color = if (materialYou && Build.VERSION.SDK_INT >= 31) {
             getColor(if (night) android.R.color.system_neutral1_900 else android.R.color.system_neutral1_10)
         } else if (night) {
-            0xFF141218.toInt()
+            0xFF161312.toInt()
         } else {
-            0xFFFFFBFF.toInt()
+            0xFFFFFBFA.toInt()
         }
         window.setBackgroundDrawable(ColorDrawable(color))
         window.statusBarColor = color

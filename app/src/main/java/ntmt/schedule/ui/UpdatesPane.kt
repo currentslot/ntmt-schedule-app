@@ -1,5 +1,11 @@
 package ntmt.schedule.ui
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Notifications
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
@@ -114,78 +120,63 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
         if (!fetch.error.isNullOrBlank()) Toast.makeText(ctx, fetch.error, Toast.LENGTH_LONG).show()
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets.statusBars,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-                title = { Text("Обновления") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Назад")
-                    }
-                },
-            )
-        },
-    ) { pad ->
+    // Surface задаёт цвет текста по теме: без него в тёмной теме заголовки остались бы чёрными
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(
         Modifier
-            .padding(pad)
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
             .verticalScroll(rememberScrollState())
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Text(
-            "Установлено $versionName",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 12.dp, bottom = 8.dp),
-        )
-
-        Text("Канал", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp))
-        Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = st.updateChannel == "stable",
-                onClick = { scope.launch { prefs.setUpdateChannel("stable") } },
-                label = { Text("Stable") },
-            )
-            FilterChip(
-                selected = st.updateChannel != "stable",
-                onClick = { scope.launch { prefs.setUpdateChannel("beta") } },
-                label = { Text("βeta") },
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TonalIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Назад", onClick = onBack)
+            ScreenHeader("Обновления", "Установлено $versionName", Modifier.weight(1f))
         }
-        if (st.updateChannel != "stable") {
+
+        SettingsBlock("Канал обновлений") {
+            Segmented(
+                options = listOf("Stable", "βeta"),
+                selected = if (st.updateChannel == "stable") 0 else 1,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            ) { i ->
+                val next = if (i == 0) "stable" else "beta"
+                scope.launch {
+                    prefs.setUpdateChannel(next)
+                    // Пуш о новой версии приходит по топику канала
+                    ntmt.schedule.notify.Push.syncUpdates(ctx, next, st.updateNotify)
+                }
+            }
             Text(
-                "Канал βeta имеет нестабильные пакеты с новыми функциями в раннем доступе. В случае если приложение перестало запускаться, откат можно сделать только перестановкой приложения.",
+                if (st.updateChannel != "stable") {
+                    "Канал βeta имеет нестабильные пакеты с новыми функциями в раннем доступе. В случае если приложение перестало запускаться, откат можно сделать только перестановкой приложения."
+                } else {
+                    "Проверенные сборки. Новые функции появляются позже, чем в βeta."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
             )
         }
 
-        Spacer(Modifier.height(8.dp))
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-            Column {
-                Line("Уведомление об обновлении", "Когда на канале есть более новая сборка", st.updateNotify) {
-                    scope.launch { prefs.setUpdateNotify(it) }
+        SettingsBlock("Проверка") {
+            Line("Уведомление об обновлении", "Сервер сообщает, когда на выбранном канале вышла новая сборка. Нужны сервисы Google", st.updateNotify, Icons.Outlined.Notifications) {
+                scope.launch {
+                    prefs.setUpdateNotify(it)
+                    ntmt.schedule.notify.Push.syncUpdates(ctx, st.updateChannel, it)
                 }
-                Line("Автопроверка", "При запуске и каждые 6 часов с виджетом. Только сервер разработчика", st.updateAuto) {
-                    scope.launch { prefs.setUpdateAuto(it) }
-                }
+            }
+            Line("Проверять при входе", "При каждом входе в приложение: GitHub, выпуски выбранного канала", st.updateAuto, Icons.Outlined.Autorenew) {
+                scope.launch { prefs.setUpdateAuto(it) }
             }
         }
 
         Button(
             onClick = { runCheck() },
             enabled = !checking && progress < 0,
-            modifier = Modifier.padding(top = 16.dp, start = 12.dp),
+            shape = Ui.Inner,
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp),
         ) {
             Text(if (checking) "Проверка…" else "Проверить сейчас")
         }
@@ -193,37 +184,36 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, start = 12.dp, end = 12.dp),
+                    .padding(top = 12.dp, start = 4.dp, end = 4.dp),
             )
         }
 
         val found = result
         if (!checking && found != null) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            BlockCard(Modifier.padding(top = 16.dp).appear(), highlighted = found.newer && found.release != null) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
                         found.error == AppUpdate.ERR_GITHUB_EMPTY -> {
-                            Text("GitHub ещё не подключён", style = MaterialTheme.typography.bodyLarge)
+                            Text("GitHub ещё не подключён", style = Ui.CardTitle)
                             Text(
-                                "Страница с ветками пока не задана. Можно взять сборку с другого источника.",
+                                "Страница с выпусками пока не задана.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         found.error != null -> {
-                            Text("Не удалось проверить", style = MaterialTheme.typography.bodyLarge)
+                            Text("Не удалось проверить", style = Ui.CardTitle)
                             Text(
-                                "Попробуйте другой источник или повторите позже.",
+                                "GitHub не ответил. Проверьте интернет и повторите позже.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         found.release == null || !found.newer -> {
-                            Text("Обновления отсутствуют", style = MaterialTheme.typography.bodyLarge)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                IconBadge(Icons.Outlined.Check)
+                                Text("Обновления отсутствуют", style = Ui.CardTitle)
+                            }
                         }
                         else -> {
                             val busy = UpdateFetch.running() && fetch.versionCode == found.release.versionCode && !fetch.done
@@ -254,29 +244,26 @@ fun UpdatesPane(st: PrefState, prefs: Prefs, onBack: () -> Unit) {
         saved?.let { file ->
             val waitingInstall = result?.release == null || AppUpdate.archiveCode(ctx, file) != result?.release?.versionCode
             if (waitingInstall && progress < 0) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                ) {
+                BlockCard(Modifier.padding(top = 16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Загружено ${AppUpdate.archiveName(ctx, file)}", style = MaterialTheme.typography.bodyLarge)
+                        Text("Загружено ${AppUpdate.archiveName(ctx, file)}", style = Ui.CardTitle)
                         Text(
                             "${"%.1f".format(file.length() / 1048576f)} МБ",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { installFile(ctx, file) }) { Text("Установить") }
+                            Button(onClick = { installFile(ctx, file) }, shape = Ui.Inner) { Text("Установить") }
                             OutlinedButton(onClick = {
                                 AppUpdate.deleteDownloaded(ctx)
                                 saved = null
-                            }) { Text("Удалить") }
+                            }, shape = Ui.Inner) { Text("Удалить") }
                         }
                     }
                 }
             }
         }
+        Spacer(Modifier.height(16.dp))
     }
     }
 }
@@ -299,7 +286,22 @@ private fun ReleaseCard(
     onCancel: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Text("Доступно ${release.versionName}", style = MaterialTheme.typography.bodyLarge)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        val scheme = MaterialTheme.colorScheme
+        androidx.compose.foundation.layout.Box(
+            Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(scheme.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painterResource(R.drawable.ic_system_update), contentDescription = null, tint = scheme.primary.readable(scheme.onPrimary), modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Доступно обновление", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
+            Text(release.versionName, style = Ui.CardTitle)
+            if (release.size > 0) {
+                Text("${"%.1f".format(release.size / 1048576f)} МБ · канал ${if (release.channel == "stable") "Stable" else "βeta"}", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            }
+        }
+    }
     if (release.notes.isNotBlank()) {
         Text(
             release.notes,
@@ -315,11 +317,11 @@ private fun ReleaseCard(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = onCancel) { Text("Отменить загрузку") }
+        OutlinedButton(onClick = onCancel, shape = Ui.Inner) { Text("Отменить загрузку") }
     } else {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onInstall) { Text(if (downloaded) "Установить" else "Скачать и установить") }
-            if (downloaded) OutlinedButton(onClick = onDelete) { Text("Удалить") }
+            Button(onClick = onInstall, shape = Ui.Inner, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (downloaded) "Установить" else "Скачать и установить") }
+            if (downloaded) OutlinedButton(onClick = onDelete, shape = Ui.Inner) { Text("Удалить") }
         }
     }
 }

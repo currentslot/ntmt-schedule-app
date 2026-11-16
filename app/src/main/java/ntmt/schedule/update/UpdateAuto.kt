@@ -7,15 +7,20 @@ import ntmt.schedule.data.Prefs
 import ntmt.schedule.notify.Notify
 
 object UpdateAuto {
-    const val WIDGET_GAP_MS = 6L * 60L * 60L * 1000L
+    /** Между входами в приложение GitHub не опрашивается чаще этого: лимит GitHub 60 запросов в час */
+    const val ENTER_GAP_MS = 3L * 60L * 1000L
 
+    /**
+     * Проверка при входе в приложение: GitHub, выпуски выбранного канала.
+     * В фоне приложение GitHub не опрашивает: о новой версии сообщает пуш сервера (PushService).
+     */
     suspend fun run(ctx: Context, force: Boolean) {
         val app = ctx.applicationContext
         val prefs = Prefs(app)
         val st = prefs.state.first()
         if (!st.updateAuto) return
         val now = System.currentTimeMillis()
-        if (!force && now - st.lastUpdateCheckAt < WIDGET_GAP_MS) return
+        if (!force && now - st.lastUpdateCheckAt < ENTER_GAP_MS) return
         if (!NtmtApi.online(app)) return
         try {
             val code = AppUpdate.installedCode(app)

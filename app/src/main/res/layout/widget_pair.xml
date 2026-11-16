@@ -48,6 +48,8 @@
         android:ellipsize="end"
         android:includeFontPadding="false"
         android:maxLines="2"
+        android:breakStrategy="high_quality"
+        android:hyphenationFrequency="normal"
         android:textColor="#1C1B1F"
         android:textSize="13sp"
         android:visibility="gone" />

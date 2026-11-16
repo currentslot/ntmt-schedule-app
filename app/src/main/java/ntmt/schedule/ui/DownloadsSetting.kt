@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Icon
@@ -81,9 +82,10 @@ internal fun DownloadsBlock(backup: BackupState) {
                         tick++
                     }) { Icon(Icons.Outlined.Close, "Хранить в кэше", tint = MaterialTheme.colorScheme.primary) }
                 } else {
-                    Icon(Icons.Outlined.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
+            icon = Icons.Outlined.Folder,
             onClick = { pick.launch(null) },
         )
     }

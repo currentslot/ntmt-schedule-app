@@ -35,6 +35,7 @@ data class PrefState(
     val highlightWeekToday: Boolean = true,
     val showTomorrow: Boolean = true,
     val liveWatch: Boolean = true,
+    val push: Boolean = true,
     val widgetNumber: Boolean = true,
     val widgetShowTime: Boolean = true,
     val widgetRoom: Boolean = true,
@@ -104,6 +105,7 @@ class Prefs(private val context: Context) {
     private val HW = booleanPreferencesKey("highlightWeekToday")
     private val ST = booleanPreferencesKey("showTomorrow")
     private val LW = booleanPreferencesKey("liveWatch")
+    private val PU = booleanPreferencesKey("push")
     private val WN = booleanPreferencesKey("widgetNumber")
     private val WST = booleanPreferencesKey("widgetShowTime")
     private val WR = booleanPreferencesKey("widgetRoom")
@@ -157,6 +159,7 @@ class Prefs(private val context: Context) {
             highlightWeekToday = saved[HW] ?: true,
             showTomorrow = saved[ST] ?: true,
             liveWatch = saved[LW] ?: true,
+            push = saved[PU] ?: true,
             widgetNumber = saved[WN] ?: true,
             widgetShowTime = saved[WST] ?: true,
             widgetRoom = saved[WR] ?: true,
@@ -239,6 +242,7 @@ class Prefs(private val context: Context) {
     suspend fun setHighlightWeekToday(v: Boolean) = context.ds.edit { it[HW] = v }
     suspend fun setShowTomorrow(v: Boolean) = context.ds.edit { it[ST] = v }
     suspend fun setLiveWatch(v: Boolean) = context.ds.edit { it[LW] = v }
+    suspend fun setPush(v: Boolean) = context.ds.edit { it[PU] = v }
     suspend fun setWidgetNumber(v: Boolean) = context.ds.edit { it[WN] = v }
     suspend fun setWidgetShowTime(v: Boolean) = context.ds.edit { it[WST] = v }
     suspend fun setWidgetRoom(v: Boolean) = context.ds.edit { it[WR] = v }
@@ -310,22 +314,36 @@ class Prefs(private val context: Context) {
         }
     }
 
+    /** Значок приложения: у каждого вида свой псевдоним входа в манифесте, включён всегда ровно один */
     suspend fun setLauncher(kind: String) {
-        val resolved = "calendar"
+        val resolved = normLauncher(kind)
         context.ds.edit { it[L] = resolved }
         val pm = context.packageManager
+        val chosen = LAUNCHERS.getValue(resolved)
         try {
-            pm.setComponentEnabledSetting(
-                ComponentName(context, "ntmt.schedule.LauncherMaterial"),
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP,
-            )
+            // Сначала включается новый значок, потом выключаются остальные: приложение не пропадает с экрана
+            (listOf(chosen) + LAUNCHERS.values.filter { it != chosen }).forEach { alias ->
+                val want = if (alias == chosen) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                val name = ComponentName(context, alias)
+                if (pm.getComponentEnabledSetting(name) != want &&
+                    !(alias == chosen && alias == DEFAULT_LAUNCHER && pm.getComponentEnabledSetting(name) == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
+                ) {
+                    pm.setComponentEnabledSetting(name, want, PackageManager.DONT_KILL_APP)
+                }
+            }
         } catch (_: Exception) {
         }
     }
 }
 
-private fun normLauncher(raw: String?): String = "calendar"
+private const val DEFAULT_LAUNCHER = "ntmt.schedule.LauncherMaterial"
+private val LAUNCHERS = mapOf(
+    "calendar" to DEFAULT_LAUNCHER,
+    "dark" to "ntmt.schedule.LauncherDark",
+    "mono" to "ntmt.schedule.LauncherMono",
+)
+
+private fun normLauncher(raw: String?): String = if (raw in LAUNCHERS.keys) raw!! else "calendar"
 
 private fun normDays(raw: Int?): Int = when (raw) {
     1, 30 -> raw

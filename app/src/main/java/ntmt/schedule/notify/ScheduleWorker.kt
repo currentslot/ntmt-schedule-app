@@ -8,7 +8,6 @@ import ntmt.schedule.data.NtmtApi
 import ntmt.schedule.data.PrefState
 import ntmt.schedule.data.Prefs
 import ntmt.schedule.data.ScheduleCache
-import ntmt.schedule.update.UpdateAuto
 import java.time.LocalTime
 
 class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
@@ -16,7 +15,12 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val prefs = Prefs(applicationContext)
         val st = prefs.state.first()
         return try {
-            if (inputData.getString("reason") == "widget") widgetTick(prefs, st) else timed(prefs, st)
+            when (inputData.getString("reason")) {
+                "widget" -> widgetTick(prefs, st)
+                // Пуш с сервера не успел обработаться сразу: проверяем, как только будет сеть
+                "push" -> if (st.notify && st.push && !pullSchedule(prefs, st, allowNotify = true)) return Result.retry()
+                else -> timed(prefs, st)
+            }
             ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
             Result.success()
         } catch (_: Exception) {
@@ -31,7 +35,6 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 prefs.setLastLiveCheck(System.currentTimeMillis())
             }
         }
-        UpdateAuto.run(applicationContext, force = false)
     }
 
     private suspend fun timed(prefs: Prefs, st: PrefState) {
@@ -40,9 +43,8 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val today = NtmtApi.today().toString()
         // Воркер просыпается раз в 15 минут и позже в режиме Doze, поэтому окно берётся с запасом
         val needMorning = st.morning && inWindow(now, st.morningTime, CATCH_UP_MINUTES) && st.lastMorning != today
-        val needAuto = st.autoRefresh && inWindow(now, st.autoRefreshTime, CATCH_UP_MINUTES) && st.lastAuto != today
-        if (!needMorning && !needAuto) return
-        if (needAuto && pullSchedule(prefs, st, allowNotify = false)) prefs.setLastAuto(today)
+        // Автообновление расписания в выбранное время убрано в 3.0: расписание подтягивают пуш сервера,
+        // «Следить по активности» и сам вход в приложение
         if (!needMorning) return
         val cached = ScheduleCache.load(applicationContext)
         val map = cached?.second
@@ -61,36 +63,8 @@ class ScheduleWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         prefs.setLastMorning(today)
     }
 
-    private suspend fun pullSchedule(prefs: Prefs, st: PrefState, allowNotify: Boolean): Boolean {
-        val group = st.group ?: return true
-        return try {
-            // Дате на сайте верить нельзя: пары меняют и без новой даты, поэтому расписание
-            // скачивается целиком (в gzip это несколько КБ) и сравнивается по содержимому
-            val cached = ScheduleCache.load(applicationContext)
-            val (catalog, map) = NtmtApi.load()
-            if (cached == null || cached.first.stamp != catalog.stamp || cached.first.semesterId != catalog.semesterId) {
-                ScheduleCache.save(applicationContext, catalog, map)
-                ntmt.schedule.widget.ScheduleWidget.refresh(applicationContext)
-            }
-            val weeks = map[group] ?: return true
-            val snap = NtmtApi.snapshot(weeks)
-            val prev = st.snapshot
-            if (allowNotify && st.notify && NtmtApi.snapshotCurrent(prev) && prev != snap) {
-                val sameDate = cached != null && cached.first.updateDt == catalog.updateDt
-                Notify.show(
-                    applicationContext,
-                    1,
-                    Notify.CH_CHANGE,
-                    "Расписание $group",
-                    if (sameDate) "Изменилось на сайте" else "Обновлено на сайте ${NtmtApi.formatUpdate(catalog.updateDt)}",
-                )
-            }
-            prefs.setSnapshot(snap)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private suspend fun pullSchedule(prefs: Prefs, st: PrefState, allowNotify: Boolean): Boolean =
+        ScheduleCheck.pull(applicationContext, prefs, st, allowNotify)
 
     private companion object {
         const val CATCH_UP_MINUTES = 120L

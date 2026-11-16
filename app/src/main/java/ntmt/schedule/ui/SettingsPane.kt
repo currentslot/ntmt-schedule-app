@@ -1,5 +1,32 @@
 package ntmt.schedule.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Today
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.MeetingRoom
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Opacity
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.NewReleases
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -150,6 +177,7 @@ import ntmt.schedule.data.Prefs
 import ntmt.schedule.data.ScheduleCache
 import ntmt.schedule.data.ru
 import ntmt.schedule.notify.Notify
+import ntmt.schedule.notify.Push
 import ntmt.schedule.WidgetOpen
 import ntmt.schedule.update.AppUpdate
 import ntmt.schedule.update.UpdateAuto
@@ -169,7 +197,7 @@ import java.util.Locale
 
 // Вкладка «Настройки» вынесена из NtmtAppUi.kt
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun MorePane(
     st: PrefState,
@@ -181,6 +209,8 @@ internal fun MorePane(
     onOpenUpdates: () -> Unit,
     onImported: (Catalog, Map<String, GroupWeeks>) -> Unit,
     onOpenCabinet: () -> Unit = {},
+    updateReady: Boolean = false,
+    topTick: Int = 0,
 ) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
@@ -196,95 +226,98 @@ internal fun MorePane(
     val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) sendTestNotify(ctx, group)
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Text("Настройки", style = MaterialTheme.typography.headlineSmall)
-            Text("Уведомления, обновление и оформление", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
+    val chevron: @Composable () -> Unit = {
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    val scroll = rememberScrollState()
+    LaunchedEffect(topTick) { if (topTick > 0) scroll.animateScrollTo(0, tween(360, easing = FastOutSlowInEasing)) }
+    Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+        ScreenHeader("Настройки", "Группа, уведомления, оформление и виджет")
 
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        // Доступное обновление: заметная карточка в начале настроек, ведёт на экран обновлений
+        AnimatedVisibility(
+            visible = updateReady,
+            enter = expandVertically(tween(280, easing = FastOutSlowInEasing)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing)) + fadeOut(tween(140)),
         ) {
-            Column(Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing))) {
-                Row(
-                    Modifier.fillMaxWidth().clickable { notes = !notes }.padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Новое в версии 2.1.1", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    val turn by animateFloatAsState(
-                        targetValue = if (notes) 180f else 0f,
-                        animationSpec = tween(220, easing = FastOutSlowInEasing),
-                        label = "notes",
-                    )
-                    Icon(
-                        Icons.Outlined.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.rotate(turn),
-                    )
+            UpdateBanner(Modifier.padding(bottom = 12.dp), onClick = onOpenUpdates)
+        }
+
+        // Группы стоят первыми: это то, что меняют чаще всего
+        BlockCard {
+            GroupRow(
+                label = "Группа по умолчанию",
+                value = group ?: "Не выбрана",
+                hint = null,
+                onClick = onChangeGroup,
+            ) {
+                TextAction("Сменить", onChangeGroup)
+            }
+            RowDivider(start = 70.dp)
+            GroupRow(
+                label = "Вторая группа",
+                value = st.group2 ?: "Не выбрано",
+                hint = if (st.group2 == null) "Для быстрого переключения кнопкой ⇄ вверху экрана" else null,
+                onClick = onChangeGroup2,
+            ) {
+                if (st.group2 != null) {
+                    TextAction("Сбросить") { scope.launch { prefs.setGroup2(null); ScheduleWidget.refresh(ctx) } }
                 }
-                if (notes) {
-                    Text(
-                        "• Изменения расписания замечаются, даже если сайт не поменял дату обновления\n• Фильтры: совместные занятия видны у каждого преподавателя и в каждой аудитории, пустые записи убраны\n• Обновления приложения только через GitHub\n\nВ версии 2.1:\n• Расписание на завтра: после последней пары и в пустое воскресенье сразу показывается следующий учебный день\n• Передача расписания и файлов по QR-кодам и NFC\n• Резервная копия учебных файлов в zip: папки кабинета и скачанные, в фоне раз в день, неделю или месяц\n• Скачанные файлы можно сохранять в выбранную папку на телефоне\n• Значок профиля в кабинете на выбор",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    )
-                }
+                TextAction("Выбрать", onChangeGroup2)
             }
         }
 
-        SettingsBlock("Приложение") {
-            SettingsTap(
-                title = "Обновления",
-                hint = buildString {
-                    append("GitHub")
-                    append(" · ")
-                    append(if (st.updateChannel == "stable") "Stable" else "βeta")
-                },
-                trailing = { Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = onOpenUpdates,
-            )
-        }
-
-        SettingsBlock("Данные расписания") {
-            SettingsTap(
-                title = "Поделиться",
-                hint = if (nfcSend) "Сохранённое расписание через QR-коды или NFC" else "Показать QR-коды сохранённого расписания",
-                trailing = { Icon(Icons.Outlined.Upload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = { if (nfcSend) pickShare = true else shareCache = Transfer.Qr },
-            )
-            SettingsTap(
-                title = "Получить",
-                hint = if (nfcReceive) "С другого телефона: QR-коды или NFC" else "Сканировать QR-коды с другого телефона",
-                trailing = { Icon(Icons.Outlined.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = { if (nfcReceive) pickReceive = true else receiveCache = Transfer.Qr },
-            )
-        }
-
-        SettingsBlock("Файлы") {
-            SettingsTap(
-                title = "Резервная копия и скачанные",
-                hint = "Настройки перенесены на главную страницу вкладки «Кабинет», они доступны без входа",
-                trailing = { Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                onClick = onOpenCabinet,
-            )
-        }
-
         SettingsBlock("Уведомления") {
-            Line("Изменения расписания", "Только уведомление, если слежение нашло правку", st.notify) { scope.launch { prefs.setNotify(it) } }
-            Line("Напоминание о парах", "Сколько пар сегодня, с какого времени и до какого", st.morning) { scope.launch { prefs.setMorning(it) } }
-            if (st.morning) {
+            Line(
+                "Изменения расписания",
+                "Уведомление, когда на сайте поменялись пары вашей группы или дата обновления",
+                st.notify,
+                Icons.Outlined.Notifications,
+            ) { on ->
+                scope.launch {
+                    prefs.setNotify(on)
+                    Push.sync(ctx, on && st.push)
+                }
+            }
+            Reveal(st.notify) {
+                Line(
+                    "Мгновенно через сервер",
+                    "Сервер проверяет сайт каждые 15–35 минут и сразу присылает пуш. Нужны сервисы Google",
+                    st.push,
+                    Icons.Outlined.Bolt,
+                ) { on ->
+                    scope.launch {
+                        prefs.setPush(on)
+                        Push.sync(ctx, on)
+                    }
+                }
+            }
+            Line(
+                "Следить по активности",
+                "Запасная проверка самим телефоном: раз в 30 минут, когда обновляется виджет или включается экран",
+                st.liveWatch,
+                Icons.Outlined.Visibility,
+            ) { scope.launch { prefs.setLiveWatch(it) } }
+            Line(
+                "Напоминание о парах",
+                "Сколько пар сегодня, с какого времени и до какого",
+                st.morning,
+                Icons.Outlined.Alarm,
+            ) { scope.launch { prefs.setMorning(it) } }
+            Reveal(st.morning) {
                 SettingsTap(
                     title = "Время напоминания",
                     hint = "Каждый день в",
-                    trailing = { Text(st.morningTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
+                    trailing = { ValueChip(st.morningTime) },
+                    icon = Icons.Outlined.Schedule,
                     onClick = { timeEdit = "morning" },
                 )
             }
             SettingsTap(
                 title = "Проверить уведомление",
                 hint = "Тестовое сообщение в шторке",
-                trailing = { Icon(Icons.Outlined.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                trailing = chevron,
+                icon = Icons.Outlined.NotificationsActive,
                 onClick = {
                     if (Build.VERSION.SDK_INT >= 33 &&
                         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -297,135 +330,100 @@ internal fun MorePane(
             )
         }
 
-        SettingsBlock("Обновление") {
-            Line(
-                "Следить по активности",
-                "Каждые 30 минут, когда обновляется виджет или открыт рабочий стол",
-                st.liveWatch,
-            ) { scope.launch { prefs.setLiveWatch(it) } }
-            Line("Автообновление расписания", "Подтянуть пары с сайта в выбранное время", st.autoRefresh) { scope.launch { prefs.setAutoRefresh(it) } }
-            if (st.autoRefresh) {
-                SettingsTap(
-                    title = "Время автообновления",
-                    hint = "Каждый день в",
-                    trailing = { Text(st.autoRefreshTime, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary) },
-                    onClick = { timeEdit = "auto" },
-                )
-            }
-        }
-
-        SettingsBlock("Персонализация") {
-            Surface(
-                color = Color.Transparent,
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onChangeGroup),
-            ) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.Outlined.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Группа по умолчанию", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(group ?: "Не выбрана", style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
-                    }
-                    Text("Сменить", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Surface(color = Color.Transparent, modifier = Modifier.fillMaxWidth().clickable(onClick = onChangeGroup2)) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(44.dp)) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.Outlined.Group, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Вторая группа", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(st.group2 ?: "Не выбрано", style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
-                    }
-                    if (st.group2 != null) {
-                        Text(
-                            "Сбросить",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .clickable { scope.launch { prefs.setGroup2(null); ScheduleWidget.refresh(ctx) } },
-                        )
-                    }
-                    Text("Выбрать", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Line("Сетка курса", "Подсветить звонки курса по номеру группы", st.highlightCourse) { scope.launch { prefs.setHighlightCourse(it) } }
-            Line("Выделять сегодня", "Рамка дня на вкладке «Неделя»", st.highlightWeekToday) { scope.launch { prefs.setHighlightWeekToday(it) } }
+        SettingsBlock("Расписание") {
             Line(
                 "Показывать расписание на завтра",
                 "После последней пары на вкладке «Сегодня» и в виджете",
                 st.showTomorrow,
+                Icons.Outlined.Event,
             ) { scope.launch { prefs.setShowTomorrow(it); ScheduleWidget.refresh(ctx) } }
-            Text("Тема", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-            Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("auto" to "Авто", "light" to "Светлая", "dark" to "Тёмная").forEach { (id, label) ->
-                    FilterChip(selected = st.theme == id, onClick = { scope.launch { prefs.setTheme(id); ScheduleWidget.refresh(ctx) } }, label = { Text(label) })
-                }
-            }
+            Line(
+                "Выделять сегодня",
+                "Рамка дня на вкладке «Неделя»",
+                st.highlightWeekToday,
+                Icons.Outlined.Today,
+            ) { scope.launch { prefs.setHighlightWeekToday(it) } }
+            Line(
+                "Сетка курса",
+                "Подсветить звонки курса по номеру группы",
+                st.highlightCourse,
+                Icons.Outlined.School,
+            ) { scope.launch { prefs.setHighlightCourse(it) } }
+        }
+
+        SettingsBlock("Оформление") {
+            val themes = listOf("auto" to "Авто", "light" to "Светлая", "dark" to "Тёмная")
+            RowLabel(Icons.Outlined.DarkMode, "Тема")
+            Segmented(
+                options = themes.map { it.second },
+                selected = themes.indexOfFirst { it.first == st.theme },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            ) { i -> scope.launch { prefs.setTheme(themes[i].first); ScheduleWidget.refresh(ctx) } }
             Line(
                 "Адаптивная тема",
                 "Material You: цвета приложения и виджета как в системе",
                 st.materialYou,
+                Icons.Outlined.Palette,
             ) { scope.launch { prefs.setMaterialYou(it); ScheduleWidget.refresh(ctx) } }
+            RowLabel(Icons.Outlined.Apps, "Значок приложения")
+            Row(
+                Modifier.fillMaxWidth().padding(start = 66.dp, end = 16.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LauncherChoice("Обычный", R.color.ic_launcher_bg, R.drawable.ic_launcher_fg, st.launcher == "calendar", Modifier.weight(1f)) {
+                    scope.launch { prefs.setLauncher("calendar") }
+                }
+                LauncherChoice("Тёмный", R.color.ic_launcher_bg_dark, R.drawable.ic_launcher_fg_dark, st.launcher == "dark", Modifier.weight(1f)) {
+                    scope.launch { prefs.setLauncher("dark") }
+                }
+                LauncherChoice("Тематический", R.color.ic_launcher_bg_tone, R.drawable.ic_launcher_fg_tone, st.launcher == "mono", Modifier.weight(1f)) {
+                    scope.launch { prefs.setLauncher("mono") }
+                }
+            }
+            Text(
+                "Тематический значок однотонный, с Android 12 берёт цвета обоев",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 66.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+            )
         }
 
         SettingsBlock("Виджет") {
-            SwitchLine("Номер пары", st.widgetNumber) {
+            SwitchLine("Номер пары", st.widgetNumber, Icons.Outlined.Tag) {
                 scope.launch { prefs.setWidgetNumber(it); ScheduleWidget.refresh(ctx) }
             }
-            SwitchLine("Время пары", st.widgetShowTime) {
+            SwitchLine("Время пары", st.widgetShowTime, Icons.Outlined.Schedule) {
                 scope.launch { prefs.setWidgetShowTime(it); ScheduleWidget.refresh(ctx) }
             }
-            if (st.widgetShowTime) {
-                Row(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = st.widgetTime == "full", onClick = { scope.launch { prefs.setWidgetTime("full"); ScheduleWidget.refresh(ctx) } }, label = { Text("Полное") })
-                    FilterChip(selected = st.widgetTime == "start", onClick = { scope.launch { prefs.setWidgetTime("start"); ScheduleWidget.refresh(ctx) } }, label = { Text("Начало") })
-                }
+            Reveal(st.widgetShowTime) {
+                Segmented(
+                    options = listOf("Полное", "Начало"),
+                    selected = if (st.widgetTime == "start") 1 else if (st.widgetTime == "full") 0 else -1,
+                    modifier = Modifier.padding(start = 66.dp, end = 16.dp, bottom = 8.dp),
+                ) { i -> scope.launch { prefs.setWidgetTime(if (i == 0) "full" else "start"); ScheduleWidget.refresh(ctx) } }
             }
-            SwitchLine("Аудитория", st.widgetRoom) {
+            SwitchLine("Аудитория", st.widgetRoom, Icons.Outlined.MeetingRoom) {
                 scope.launch { prefs.setWidgetRoom(it); ScheduleWidget.refresh(ctx) }
             }
-            SwitchLine("Доп. Информация", st.widgetHeader) {
+            SwitchLine("Доп. информация", st.widgetHeader, Icons.Outlined.Info) {
                 scope.launch { prefs.setWidgetHeader(it); ScheduleWidget.refresh(ctx) }
             }
-            Text("Открывать вкладку", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Today" to "Сегодня", "Week" to "Неделя", "Bells" to "Звонки", "Cabinet" to "Кабинет", "More" to "Настройки").chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { (id, label) ->
-                            FilterChip(
-                                selected = st.widgetOpen == id,
-                                onClick = { scope.launch { prefs.setWidgetOpen(id); ScheduleWidget.refresh(ctx) } },
-                                label = { Text(label) },
-                            )
-                        }
+            RowLabel(Icons.Outlined.OpenInNew, "Открывать вкладку")
+            FlowRow(
+                Modifier.padding(start = 66.dp, end = 16.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("Today" to "Сегодня", "Week" to "Неделя", "Bells" to "Звонки", "Cabinet" to "Кабинет", "More" to "Настройки").forEach { (id, label) ->
+                    Choice(label, selected = st.widgetOpen == id) {
+                        scope.launch { prefs.setWidgetOpen(id); ScheduleWidget.refresh(ctx) }
                     }
                 }
             }
             var alpha by remember(st.widgetAlpha) { mutableFloatStateOf(st.widgetAlpha.toFloat()) }
             var detent by remember { mutableIntStateOf((st.widgetAlpha / 10) * 10) }
             var lastPush by remember { mutableLongStateOf(0L) }
-            Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Прозрачность", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                    Text(
-                        "${alpha.roundToInt()}%",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
-                }
-            }
+            RowLabel(Icons.Outlined.Opacity, "Прозрачность") { ValueChip("${alpha.roundToInt()}%") }
             Slider(
                 value = alpha,
                 onValueChange = { raw ->
@@ -450,20 +448,83 @@ internal fun MorePane(
                 },
                 onValueChangeFinished = { scope.launch { prefs.setWidgetAlpha(alpha.roundToInt()); ScheduleWidget.refresh(ctx) } },
                 valueRange = 10f..100f,
-                modifier = Modifier.padding(horizontal = 12.dp),
+                modifier = Modifier.padding(start = 62.dp, end = 16.dp),
             )
         }
-        LinkRow(
-            label = "GitHub",
-            url = "https://github.com/currentslot/ntmt-schedule-app",
-            mark = "github",
-            onQr = { githubQr = true },
-        )
-        LinkRow(
-            label = "@currentslot",
-            url = "https://t.me/currentslot",
-            mark = "telegram",
-        )
+
+        SettingsBlock("Данные и файлы") {
+            SettingsTap(
+                title = "Поделиться расписанием",
+                hint = if (nfcSend) "Сохранённое расписание через QR-коды или NFC" else "Показать QR-коды сохранённого расписания",
+                trailing = chevron,
+                icon = Icons.Outlined.Upload,
+                onClick = { if (nfcSend) pickShare = true else shareCache = Transfer.Qr },
+            )
+            SettingsTap(
+                title = "Получить расписание",
+                hint = if (nfcReceive) "С другого телефона: QR-коды или NFC" else "Сканировать QR-коды с другого телефона",
+                trailing = chevron,
+                icon = Icons.Outlined.Download,
+                onClick = { if (nfcReceive) pickReceive = true else receiveCache = Transfer.Qr },
+            )
+            SettingsTap(
+                title = "Резервная копия и скачанные",
+                hint = "Настройки находятся на вкладке «Кабинет» и доступны без входа",
+                trailing = chevron,
+                icon = Icons.Outlined.Folder,
+                onClick = onOpenCabinet,
+            )
+        }
+
+        SettingsBlock("О приложении") {
+            SettingsTap(
+                title = "Обновления",
+                hint = buildString {
+                    append("GitHub")
+                    append(" · ")
+                    append(if (st.updateChannel == "stable") "Stable" else "βeta")
+                },
+                trailing = { if (updateReady) AccentPill("Доступно") else chevron() },
+                icon = Icons.Outlined.SystemUpdate,
+                onClick = onOpenUpdates,
+            )
+            Column(Modifier.animateContentSize(tween(280, easing = FastOutSlowInEasing))) {
+                val turn by animateFloatAsState(
+                    targetValue = if (notes) 180f else 0f,
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    label = "notes",
+                )
+                SettingsTap(
+                    title = "Новое в версии 3.0",
+                    hint = "Что изменилось в приложении",
+                    trailing = {
+                        Icon(
+                            Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.rotate(turn),
+                        )
+                    },
+                    icon = Icons.Outlined.NewReleases,
+                    onClick = { notes = !notes },
+                )
+                if (notes) {
+                    Text(
+                        WHATS_NEW,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 66.dp, end = 16.dp, bottom = 12.dp),
+                    )
+                }
+            }
+            LinkRow(
+                label = "GitHub",
+                hint = "Исходный код и выпуски",
+                url = "https://github.com/currentslot/ntmt-schedule-app",
+                mark = "github",
+                onQr = { githubQr = true },
+            )
+        }
         VersionMark()
     }
     if (pickShare) {
@@ -478,79 +539,173 @@ internal fun MorePane(
     if (timeEdit != null) {
         TimePickDialog(
             title = "Каждый день в",
-            initial = if (timeEdit == "auto") st.autoRefreshTime else st.morningTime,
+            initial = st.morningTime,
             onDismiss = { timeEdit = null },
             onConfirm = { v ->
                 val kind = timeEdit
-                scope.launch {
-                    if (kind == "auto") prefs.setAutoRefreshTime(v) else prefs.setMorningTime(v)
-                }
+                scope.launch { if (kind == "morning") prefs.setMorningTime(v) }
                 timeEdit = null
             },
         )
     }
 }
 
+private const val WHATS_NEW =
+    "• Новый интерфейс всех вкладок: полоса недели и перелистывание дней пальцем на вкладке «Сегодня», дни карточками на вкладке «Неделя», настройки по разделам\n" +
+        "• Мгновенные уведомления об изменении расписания через сервер\n" +
+        "• Уведомление о новой версии приложения от сервера, проверка обновлений при каждом входе\n" +
+        "• В строке вверху видно, что нет сети или недоступен сам сайт расписания\n" +
+        "• Новый значок приложения и выбор: обычный, тёмный, тематический\n" +
+        "• Выбор группы плитками по специальностям\n" +
+        "• Повторное нажатие на вкладку возвращает в начало списка\n" +
+        "• В виджете название предмета переносится по правилам языка"
+
+/** Карточка «Доступно обновление» */
+@Composable
+internal fun UpdateBanner(modifier: Modifier = Modifier, title: String = "Доступно обновление", hint: String = "Нажмите, чтобы посмотреть и установить", onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val fg = scheme.primary.readable(scheme.onPrimary)
+    Row(
+        modifier.fillMaxWidth().pressable(Ui.Card, onClick = onClick).background(scheme.primary).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(fg.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Icon(painterResource(R.drawable.ic_system_update), contentDescription = null, tint = fg, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Ui.CardTitle, color = fg)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.85f))
+        }
+        Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = fg)
+    }
+}
+
+/** Строка, которая появляется и исчезает вместе с включением настройки над ней */
+@Composable
+private fun ColumnScope.Reveal(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(tween(240, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(180)),
+        exit = shrinkVertically(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(120)),
+    ) { content() }
+}
+
+/** Вариант значка приложения: как он будет выглядеть на рабочем столе */
+@Composable
+private fun LauncherChoice(label: String, bg: Int, fg: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val ring by androidx.compose.animation.animateColorAsState(if (selected) scheme.primary else Color.Transparent, Ui.Tint, label = "icon-ring")
+    Column(
+        modifier.pressable(Ui.Inner, onClick = onClick).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(64.dp).border(2.dp, ring, RoundedCornerShape(20.dp)).padding(5.dp)) {
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(15.dp)).background(androidx.compose.ui.res.colorResource(bg)),
+                contentAlignment = Alignment.Center,
+            ) {
+                // У адаптивного значка видна середина 72 из 108, поэтому рисунок в полтора раза больше окна
+                Image(painterResource(fg), contentDescription = null, modifier = Modifier.requiredSize(81.dp))
+            }
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) scheme.primary else scheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+/** Строка группы в верхней карточке настроек */
+@Composable
+private fun GroupRow(label: String, value: String, hint: String?, onClick: () -> Unit, actions: @Composable () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconBadge(Icons.Outlined.Group, size = 40.dp)
+        Column(Modifier.padding(start = 14.dp).weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = Ui.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (hint != null) {
+                Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Row(Modifier.padding(start = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { actions() }
+    }
+}
+
+/** Значение справа в строке настройки: время, проценты */
+@Composable
+private fun ValueChip(text: String) {
+    Surface(shape = Ui.Inner, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Text(
+            text,
+            style = Ui.Time.copy(fontSize = 16.sp, lineHeight = 21.sp),
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
+
+/** Подпись к элементу выбора внутри блока: значок, название и необязательное значение справа */
+@Composable
+private fun RowLabel(icon: ImageVector, title: String, trailing: @Composable () -> Unit = {}) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        IconBadge(icon)
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        trailing()
+    }
+}
+
+/** Название раздела и карточка с его строками */
 @Composable
 internal fun SettingsBlock(title: String, content: @Composable ColumnScope.() -> Unit) {
     Text(
         title,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp, start = 12.dp),
+        style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp, start = 16.dp),
     )
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = Ui.Card, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        // Без отступов сверху и снизу: волна нажатия у первой и последней строки доходит до края карточки
         Column(content = content)
     }
 }
 
 @Composable
-private fun LinkRow(label: String, url: String, mark: String, onQr: (() -> Unit)? = null) {
+private fun LinkRow(label: String, hint: String, url: String, mark: String, onQr: (() -> Unit)? = null) {
     val uri = LocalUriHandler.current
-    val shape = RoundedCornerShape(16.dp)
     Row(
-        Modifier.fillMaxWidth().padding(top = 8.dp),
+        Modifier.fillMaxWidth().clickable { uri.openUri(url) }.padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Surface(
-            shape = shape,
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier
-                .weight(1f)
-                .clip(shape)
-                .clickable { uri.openUri(url) },
-        ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                BrandMark(mark)
-                Text(label, style = MaterialTheme.typography.bodyLarge)
-            }
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center,
+        ) { BrandMark(mark) }
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (onQr != null) {
-            Surface(
-                shape = shape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(shape)
-                    .clickable(onClick = onQr),
-            ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.QrCode, contentDescription = "QR-код", tint = MaterialTheme.colorScheme.onSurface)
-                }
-            }
-        }
+        if (onQr != null) TonalIcon(Icons.Outlined.QrCode, "QR-код, скопировать, поделиться", size = 36.dp, onClick = onQr)
+        Icon(Icons.Outlined.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
     }
 }
 
 @Composable
 private fun BrandMark(kind: String) {
     val tint = MaterialTheme.colorScheme.onSurface
-    val data = if (kind == "telegram") TELEGRAM_PATH else GITHUB_PATH
+    val data = GITHUB_PATH
     val path = remember(kind) { androidx.compose.ui.graphics.vector.PathParser().parsePathString(data).toPath() }
     androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
         val s = size.minDimension / 24f
@@ -563,9 +718,6 @@ private fun BrandMark(kind: String) {
 private const val GITHUB_PATH =
     "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
 
-private const val TELEGRAM_PATH =
-    "M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"
-
 @Composable
 private fun VersionMark() {
     Row(
@@ -574,7 +726,7 @@ private fun VersionMark() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Версия 2.1.1 Stable",
+            "Версия 3.0 Stable (136)",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -646,43 +798,51 @@ internal fun TimePickDialog(
     }
 }
 
+/** Общая строка настройки: значок, название с пояснением и элемент справа */
 @Composable
-private fun SwitchLine(title: String, checked: Boolean, on: (Boolean) -> Unit) {
+private fun SettingRow(
+    icon: ImageVector?,
+    title: String,
+    hint: String?,
+    modifier: Modifier = Modifier,
+    trailing: @Composable () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        Switch(checked, on)
-    }
-}
-
-@Composable
-internal fun Line(title: String, hint: String, checked: Boolean, on: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+        if (icon != null) IconBadge(icon)
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(checked, on)
-    }
-}
-
-@Composable
-internal fun SettingsTap(title: String, hint: String, trailing: @Composable () -> Unit, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         trailing()
     }
+}
+
+@Composable
+private fun SwitchLine(title: String, checked: Boolean, icon: ImageVector? = null, on: (Boolean) -> Unit) {
+    SettingRow(icon, title, null, Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = on)) {
+        Switch(checked, onCheckedChange = null)
+    }
+}
+
+/** Переключатель с пояснением. Нажимается вся строка, а не только сам переключатель */
+@Composable
+internal fun Line(title: String, hint: String, checked: Boolean, icon: ImageVector? = null, on: (Boolean) -> Unit) {
+    SettingRow(icon, title, hint, Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = on)) {
+        Switch(checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+internal fun SettingsTap(
+    title: String,
+    hint: String,
+    trailing: @Composable () -> Unit,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    SettingRow(icon, title, hint, Modifier.clickable(onClick = onClick), trailing)
 }

@@ -23,7 +23,10 @@ class NtmtApp : Application() {
             runBlocking {
                 val prefs = Prefs(this@NtmtApp)
                 prefs.ensureUpdateDefaults()
-                ntmt.schedule.backup.Backup.schedule(this@NtmtApp, prefs.state.first().backup)
+                val st = prefs.state.first()
+                ntmt.schedule.backup.Backup.schedule(this@NtmtApp, st.backup)
+                ntmt.schedule.notify.Push.sync(this@NtmtApp, st.notify && st.push)
+                ntmt.schedule.notify.Push.syncUpdates(this@NtmtApp, st.updateChannel, st.updateNotify)
             }
             ntmt.schedule.data.ScheduleCache.sweep(this)
             val req = PeriodicWorkRequestBuilder<ScheduleWorker>(15, TimeUnit.MINUTES).build()

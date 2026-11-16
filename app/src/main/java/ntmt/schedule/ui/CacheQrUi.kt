@@ -1,5 +1,9 @@
 package ntmt.schedule.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ContentCopy
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
@@ -104,7 +108,8 @@ internal fun LinkQrDialog(url: String, onClose: () -> Unit) {
                 Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("GitHub", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
+                Text("GitHub", style = Ui.CardTitle, modifier = Modifier.fillMaxWidth())
+                Text("Наведите камеру на код или отправьте ссылку", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
                 Image(
                     image.asImageBitmap(),
                     contentDescription = "QR-код",
@@ -117,7 +122,47 @@ internal fun LinkQrDialog(url: String, onClose: () -> Unit) {
                         .background(androidx.compose.ui.graphics.Color.White)
                         .padding(8.dp),
                 )
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                val ctx = LocalContext.current
+                var copied by remember { mutableStateOf(false) }
+                LaunchedEffect(copied) {
+                    if (copied) {
+                        kotlinx.coroutines.delay(2_000)
+                        copied = false
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = {
+                            val clip = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                            clip?.setPrimaryClip(android.content.ClipData.newPlainText("GitHub", url))
+                            copied = true
+                        },
+                        shape = Ui.Inner,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+                        modifier = Modifier.weight(1f).height(46.dp),
+                    ) {
+                        Icon(if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(if (copied) "Скопировано" else "Скопировать", maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 6.dp))
+                    }
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = {
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                                .setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, url)
+                            try {
+                                ctx.startActivity(android.content.Intent.createChooser(send, "Поделиться ссылкой"))
+                            } catch (_: Exception) {
+                            }
+                        },
+                        shape = Ui.Inner,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+                        modifier = Modifier.weight(1f).height(46.dp),
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("Поделиться", maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onClose) { Text("Закрыть") }
                 }
             }

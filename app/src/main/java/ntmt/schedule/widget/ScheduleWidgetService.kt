@@ -142,18 +142,7 @@ class ScheduleWidgetService : RemoteViewsService() {
             val content = (widthDp - 24).coerceAtLeast(80) * dm.density
             val chipW = chipPaint.measureText(meta) + 12f * dm.density + 6f * dm.density
             val avail = content - chipW
-            if (avail <= 24f * dm.density) return "" to title
-            if (titlePaint.measureText(title) <= avail) return title to ""
-            val count = titlePaint.breakText(title, true, avail, null)
-            if (count <= 0) return "" to title
-            var cut = count
-            if (cut < title.length && !title[cut - 1].isWhitespace() && title[cut].isLetterOrDigit()) {
-                val space = title.lastIndexOf(' ', cut - 1)
-                if (space > 0) cut = space
-            }
-            val head = title.substring(0, cut).trim()
-            val tail = title.substring(cut).trim()
-            return if (head.isEmpty()) "" to title else head to tail
+            return WidgetWrap.split(title, avail, 24f * dm.density) { titlePaint.measureText(it) }
         }
 
         private fun clean(v: String?): String? {

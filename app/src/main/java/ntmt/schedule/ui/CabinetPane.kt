@@ -6,6 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -596,20 +600,21 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
         Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Личный кабинет",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.weight(1f),
-            )
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Личный кабинет", style = Ui.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "Учебные файлы с old.ntiustu.ru",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
             }
         }
         if (profile != null && error != null) {
-            SelectionContainer {
-                Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
+            SelectionContainer { ErrorBox(error!!) }
         }
         val shown = profile
         val page = files
@@ -644,10 +649,7 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (target) {
         CabScreen.Downloads -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { downloads = false }) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
-                Text("Скачанные файлы", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            }
+            SubHeader("Скачанные файлы", if (savedFiles.isEmpty()) null else filesCount(savedFiles.size)) { downloads = false }
             OutlinedButton(
                 onClick = { if (nfcReceive) pickReceive = true else receiveFile = Transfer.Qr },
                 modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
@@ -655,25 +657,23 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
             ) {
                 Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Получить файл")
+                Text("Получить файл с другого телефона")
             }
             if (savedFiles.isEmpty()) {
-                Text("Нет скачанных файлов", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StateBox("Нет скачанных файлов", hint = "Файлы из «Моих файлов» и полученные по QR или NFC появятся здесь", emoji = "📂")
             }
-            savedFiles.forEach { file ->
-                Surface(
-                    shape = CabShape,
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(Modifier.padding(start = 14.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Description, contentDescription = null)
+            if (savedFiles.isNotEmpty()) BlockCard {
+            savedFiles.forEachIndexed { fileIndex, file ->
+                if (fileIndex > 0) RowDivider(start = 62.dp)
+                Box(Modifier.fillMaxWidth().clickable { openSaved(file) }) {
+                    Row(Modifier.padding(start = 14.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FileBadge(folder = false)
                         Text(
                             file.name,
                             style = MaterialTheme.typography.bodyLarge,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp).clickable { openSaved(file) },
+                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                         )
                         RowAction(Icons.Outlined.Upload, if (nfcSend) "Передать по QR или NFC" else "Передать через QR") {
                             scope.launch {
@@ -709,9 +709,10 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                                 )
                             }
                         }
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(6.dp))
                     }
                 }
+            }
             }
         }
         is CabScreen.Folder -> {
@@ -732,13 +733,41 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                 name !in been && name != page.title.trim() && name != ".." &&
                     !name.equals("назад", true) && !name.equals("вверх", true)
             }.sortedBy { if (it.folder) 0 else 1 }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { leaveFolder() }) { Icon(Icons.Outlined.ChevronLeft, "Назад") }
-                Text(
-                    trail.lastOrNull()?.name ?: page.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+            SubHeader(trail.lastOrNull()?.name ?: page.title, null) { leaveFolder() }
+            // Путь: по нажатию возвращает в любую папку выше
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                trail.forEachIndexed { index, crumb ->
+                    if (index > 0) {
+                        Icon(
+                            Icons.Outlined.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    val last = index == trail.lastIndex
+                    Text(
+                        crumb.name,
+                        color = if (last) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (last) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clickable {
+                                if (index < crumbs.lastIndex && index < pages.lastIndex) {
+                                    crumbs = crumbs.take(index + 1)
+                                    pages = pages.take(index + 1)
+                                    files = pages.last()
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
             OutlinedButton(
                 onClick = {
@@ -748,25 +777,10 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
                 shape = CabShape,
-            ) { Text("Скачанные файлы") }
-            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                trail.forEachIndexed { index, crumb ->
-                    if (index > 0) {
-                        Text(" / ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(
-                        crumb.name,
-                        color = if (index == trail.lastIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.clickable {
-                            if (index < crumbs.lastIndex && index < pages.lastIndex) {
-                                crumbs = crumbs.take(index + 1)
-                                pages = pages.take(index + 1)
-                                files = pages.last()
-                            }
-                        },
-                    )
-                }
+            ) {
+                Icon(Icons.Outlined.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Скачанные файлы")
             }
             if (page.manage) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -797,13 +811,13 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                 }
             }
             if (items.isEmpty()) {
-                Text("Папка пуста", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StateBox("Папка пуста", emoji = "📂")
             }
-            items.forEach { entry ->
-                Surface(
-                    shape = CabShape,
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth().clip(CabShape).clickable(enabled = !busy && (entry.folder || loadingUrl == null)) {
+            if (items.isNotEmpty()) BlockCard {
+            items.forEachIndexed { entryIndex, entry ->
+                if (entryIndex > 0) RowDivider(start = 62.dp)
+                Box(
+                    Modifier.fillMaxWidth().clickable(enabled = !busy && (entry.folder || loadingUrl == null)) {
                         if (entry.folder) {
                             loadFolder(entry.name, entry.url, trail + Crumb(entry.name, entry.url))
                         } else {
@@ -812,16 +826,13 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                     },
                 ) {
                     Column {
-                        Row(Modifier.padding(start = 14.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                if (entry.folder) Icons.Outlined.Folder else Icons.Outlined.Description,
-                                contentDescription = null,
-                            )
-                            Row(Modifier.weight(1f).padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.padding(start = 14.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FileBadge(folder = entry.folder)
+                            Row(Modifier.weight(1f).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     entry.name,
                                     style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f, fill = false),
                                 )
@@ -845,7 +856,15 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                                     ask = Ask.Remove(entry.name, entry.folder)
                                 }
                             }
-                            Spacer(Modifier.width(4.dp))
+                            if (entry.folder && !page.manage) {
+                                Icon(
+                                    Icons.Outlined.ChevronRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 6.dp).size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
                         }
                         if (loadingUrl == entry.url) {
                             if (loadingFraction > 0f) {
@@ -860,21 +879,18 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                     }
                 }
             }
+            }
         }
         is CabScreen.Home -> {
             val shown = target.profile
-            Surface(
-                shape = CabShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BlockCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         Surface(
                             onClick = { pickAvatar = true },
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(44.dp),
+                            modifier = Modifier.size(52.dp),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -885,7 +901,7 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                             }
                         }
                         Column {
-                            Text(shown.name, style = MaterialTheme.typography.titleMedium)
+                            Text(shown.name, style = Ui.CardTitle)
                             Text(shown.login, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -906,7 +922,11 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                         },
                         modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
                         shape = CabShape,
-                    ) { Text("Скачанные файлы") }
+                    ) {
+                        Icon(Icons.Outlined.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Скачанные файлы")
+                    }
                 }
             }
             OutlinedButton(
@@ -927,18 +947,19 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
             }
         }
         CabScreen.Quick -> {
-            Surface(
-                shape = CabShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(login.ifBlank { "Сохранённый вход" }, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Подтверждение кодом, отпечатком или лицом",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            BlockCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        IconBadge(Icons.Outlined.Fingerprint, size = 52.dp)
+                        Column {
+                            Text(login.ifBlank { "Сохранённый вход" }, style = Ui.CardTitle)
+                            Text(
+                                "Подтверждение кодом, отпечатком или лицом",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Button(
                         onClick = {
                             unlockThen {
@@ -962,19 +983,26 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                         },
                         modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
                         shape = CabShape,
-                    ) { Text("Скачанные файлы") }
+                    ) {
+                        Icon(Icons.Outlined.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Скачанные файлы")
+                    }
                     TextButton(onClick = { other = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Другое имя") }
                 }
             }
         }
         CabScreen.Login -> {
+            BlockCard {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Вход", style = Ui.CardTitle)
             OutlinedTextField(
                 value = login,
                 onValueChange = { login = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Имя пользователя") },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = Ui.Inner,
             )
             OutlinedTextField(
                 value = password,
@@ -984,13 +1012,15 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                shape = RoundedCornerShape(16.dp),
+                shape = Ui.Inner,
             )
+            }
             Line(
                 "Запомнить",
                 "Быстрый вход кодом, отпечатком или лицом",
                 rememberMe,
             ) { rememberMe = it }
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = { signIn(login, password, rememberMe) },
                 enabled = !busy,
@@ -1004,7 +1034,13 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
                 },
                 modifier = Modifier.fillMaxWidth().height(CAB_SECONDARY),
                 shape = CabShape,
-            ) { Text("Скачанные файлы") }
+            ) {
+                Icon(Icons.Outlined.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Скачанные файлы")
+            }
+            }
+            }
             if (saved) {
                 TextButton(onClick = { other = false }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Быстрый вход") }
             }
@@ -1023,7 +1059,7 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
             SideEffect { settingsAt = -1 }
         }
         if (error != null && profile == null) {
-            Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            ErrorBox(error!!)
         }
         when (val pending = ask) {
             Ask.Create, is Ask.Rename -> AlertDialog(
@@ -1159,7 +1195,7 @@ fun CabinetPane(active: Boolean = true, home: Int = 0, toSettings: Int = 0, modi
     ) { item ->
         if (item != null) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = Ui.Inner,
                 color = MaterialTheme.colorScheme.inverseSurface,
                 shadowElevation = 6.dp,
             ) {
@@ -1216,7 +1252,7 @@ internal fun DownloadNotice(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = Ui.Inner,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shadowElevation = 8.dp,
     ) {
@@ -1259,7 +1295,55 @@ private sealed class CabScreen(val key: String, val depth: Int) {
 // Одинаковые размеры кнопок по всему кабинету
 private val CAB_PRIMARY = 52.dp
 private val CAB_SECONDARY = 48.dp
-private val CabShape = RoundedCornerShape(16.dp)
+private val CabShape = Ui.Inner
+
+/** Заголовок вложенного экрана кабинета: «назад», название и необязательная подпись */
+@Composable
+private fun SubHeader(title: String, hint: String?, onBack: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        TonalIcon(Icons.Outlined.ChevronLeft, "Назад", onClick = onBack)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Ui.CardTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Значок строки: папка заметнее файла */
+@Composable
+private fun FileBadge(folder: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).background(if (folder) scheme.primaryContainer else scheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (folder) Icons.Outlined.Folder else Icons.Outlined.Description,
+            contentDescription = null,
+            tint = if (folder) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** Сообщение об ошибке в заметной плашке */
+@Composable
+private fun ErrorBox(text: String) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(shape = Ui.Inner, color = scheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = scheme.onErrorContainer, modifier = Modifier.size(20.dp))
+            Text(text, color = scheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private fun filesCount(n: Int): String = when {
+    n % 100 in 11..14 -> "$n файлов"
+    n % 10 == 1 -> "$n файл"
+    n % 10 in 2..4 -> "$n файла"
+    else -> "$n файлов"
+}
 
 /** Значок профиля в кабинете: пять вариантов на выбор, выбор хранится на телефоне */
 private object CabinetAvatar {

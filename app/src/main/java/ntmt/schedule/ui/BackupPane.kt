@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
@@ -126,7 +128,7 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
     SettingsBlock("Резервная копия") {
         // Без быстрого входа копии недоступны: фоновый вход берётся из подтверждённого отпечатком быстрого входа
         if (!quickReady) {
-            Column(Modifier.padding(12.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("Архив учебных файлов", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "Доступно только с быстрым входом. Войдите в кабинет с галочкой «Запомнить» и подтвердите отпечатком или кодом",
@@ -135,7 +137,7 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
                 )
                 // В кабинете форма входа и так на этой странице
                 if (!inCabinet) {
-                    OutlinedButton(onClick = { login.openLogin() }, shape = RoundedCornerShape(16.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    OutlinedButton(onClick = { login.openLogin() }, shape = Ui.Inner, modifier = Modifier.padding(top = 8.dp)) {
                         Text("Перейти ко входу")
                     }
                 }
@@ -146,6 +148,7 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
             "Архив учебных файлов",
             "Периодически сохранять скачанные и выбранные папки кабинета в zip. Хранится только последний архив, предыдущие удаляются",
             backup.on,
+            Icons.Outlined.FolderZip,
         ) { on ->
             if (on && backup.dest == null) {
                 enableAfterPick = true
@@ -158,27 +161,29 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
         SettingsTap(
             title = "Куда сохранять архивы",
             hint = backup.dest?.let { Backup.folderName(ctx, it) } ?: "Папка не выбрана",
-            trailing = { Icon(Icons.Outlined.FolderZip, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            trailing = { Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            icon = Icons.Outlined.Folder,
             onClick = { pickDest.launch(null) },
         )
         if (!backup.on) return@SettingsBlock
 
-        Text("Что сохранять", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-        Line("Скачанные", "Файлы из «Скачанных файлов» кабинета, разложенные по папкам, как на сервере", backup.saved) {
+        Text("Что сохранять", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 2.dp))
+        Line("Скачанные", "Файлы из «Скачанных файлов» кабинета, разложенные по папкам, как на сервере", backup.saved, Icons.Outlined.SaveAlt) {
             scope.launch { prefs.setBackupSaved(it) }
         }
         Line(
             "Папки с сайта кабинета",
             "Выбранные папки «Моих файлов» с old.ntiustu.ru, отдельным архивом. Собирается после входа в кабинет, когда подошёл срок",
             backup.cabinet,
+            Icons.Outlined.Cloud,
         ) { scope.launch { prefs.setBackupCabinet(it) } }
         if (backup.cabinet) {
             backup.cabinetFolders.forEach { folder ->
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Cloud, contentDescription = null, modifier = Modifier.size(20.dp))
+                Row(Modifier.fillMaxWidth().padding(start = 66.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     Text(
                         folder.path,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 10.dp).weight(1f),
@@ -191,27 +196,25 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
             SettingsTap(
                 title = "Выбрать папки кабинета",
                 hint = if (backup.cabinetFolders.isEmpty()) "Ничего не выбрано. Нужен вход в кабинет" else "Выбрано: ${backup.cabinetFolders.size}",
-                trailing = { Icon(Icons.Outlined.ChecklistRtl, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                trailing = { Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                icon = Icons.Outlined.ChecklistRtl,
                 onClick = { pickCabinet = true },
             )
         }
 
-        Text("Как часто", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
+        Text("Как часто", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, top = 10.dp))
         // Кнопки переносятся целиком на следующую строку, а не по словам внутри кнопки
         FlowRow(
-            Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             listOf(1 to "Каждый день", 7 to "Раз в неделю", 30 to "Раз в месяц").forEach { (days, label) ->
-                FilterChip(
-                    selected = backup.days == days,
-                    onClick = { reschedule { prefs.setBackupDays(days) } },
-                    label = { Text(label, maxLines = 1, softWrap = false) },
-                )
+                Choice(label, selected = backup.days == days) { reschedule { prefs.setBackupDays(days) } }
             }
         }
 
-        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)) {
             Text(
                 "Скачанные: " + (backup.last ?: "архивов ещё не было"),
                 style = MaterialTheme.typography.bodySmall,
@@ -230,14 +233,14 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
                 "Чтобы папки кабинета сохранялись фоном, откройте «Выбрать папки кабинета» и подтвердите вход отпечатком",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
-        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (busy) {
                 OutlinedButton(
                     onClick = { WorkManager.getInstance(ctx).cancelUniqueWork(Backup.NOW) },
-                    shape = RoundedCornerShape(16.dp),
+                    shape = Ui.Inner,
                     modifier = Modifier.weight(1f).height(48.dp),
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -249,7 +252,7 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
                     // Копия идёт фоном со своим входом, подтверждение не нужно
                     onClick = { Backup.runNow(ctx, cabinet = false) },
                     enabled = backup.dest != null,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = Ui.Inner,
                     modifier = Modifier.weight(1f).height(48.dp),
                 ) {
                     Text("Сделать копию сейчас", maxLines = 1)
@@ -284,7 +287,7 @@ internal fun BackupBlock(backup: BackupState, prefs: Prefs, vaultKey: Any? = nul
             kotlinx.coroutines.delay(3000)
             cleared = null
         }
-        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 4.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, top = 4.dp))
     }
     if (pickCabinet) {
         CabinetFolderPicker(

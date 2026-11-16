@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Значок 3.0: лист календаря с отмеченным днём. Рисуется в поле 108x108, видимая часть — середина 72x72 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.28" android:pathData="M38,34h32a8,8 0 0 1 8,8v30a8,8 0 0 1 -8,8h-32a8,8 0 0 1 -8,-8v-30a8,8 0 0 1 8,-8z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.7" android:pathData="M38,34h32a8,8 0 0 1 8,8v5h-48v-5a8,8 0 0 1 8,-8z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M44,28a2.5,2.5 0 0 1 2.5,2.5v7a2.5,2.5 0 0 1 -5,0v-7a2.5,2.5 0 0 1 2.5,-2.5zM64,28a2.5,2.5 0 0 1 2.5,2.5v7a2.5,2.5 0 0 1 -5,0v-7a2.5,2.5 0 0 1 2.5,-2.5z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.6" android:pathData="M39.5,53h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5zM64.5,53h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5zM39.5,65.5h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5zM52.0,65.5h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5zM64.5,65.5h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M52.0,53h4a2.5,2.5 0 0 1 2.5,2.5v4a2.5,2.5 0 0 1 -2.5,2.5h-4a2.5,2.5 0 0 1 -2.5,-2.5v-4a2.5,2.5 0 0 1 2.5,-2.5z" />
+</vector>

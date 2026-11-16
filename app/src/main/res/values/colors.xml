@@ -2,7 +2,11 @@
     <color name="md_primary">#B3261E</color>
     <color name="md_navy">#172338</color>
     <color name="ic_launcher_bg">#B3261E</color>
-    <color name="window_bg">#FFFBFF</color>
+    <color name="ic_launcher_bg_dark">#1E1B1A</color>
+    <!-- Тематический значок: до Android 12 нейтральный серый, с Android 12 цвета обоев (values-v31) -->
+    <color name="ic_launcher_bg_tone">#E8E1DF</color>
+    <color name="ic_launcher_tone">#4A4341</color>
+    <color name="window_bg">#FFFBFA</color>
     <color name="widget_bg">#F7F2F4</color>
     <color name="widget_fg">#1C1B1F</color>
     <color name="widget_muted">#79747E</color>
