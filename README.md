@@ -21,7 +21,16 @@
 - Последнее расписание остаётся, если нет сети
 - Личный кабинет: «Мои файлы», скачивание и загрузка файлов
 
-## Новое в 2.1
+## Новое в 3.0
+
+- Новый дизайн всех разделов в стиле Material 3, цвета Material You
+- Новый значок: лист календаря; на выбор цветной, тёмный и монохромный
+- Свайп между днями на экране «Сегодня»
+- Мгновенные уведомления об изменении расписания и о новых версиях приложения через Firebase Cloud Messaging
+- Проверка обновлений при входе в приложение и по уведомлению, без фонового опроса по таймеру
+- Улучшенный перенос строк в виджете
+
+## Из 2.1
 
 - Расписание на завтра: после последней пары и в пустое воскресенье сразу показывается следующий учебный день
 - Передача расписания и файлов по QR-кодам и NFC
@@ -82,6 +91,11 @@
 
 ## Сборка
 
-Kotlin и Jetpack Compose, Gradle 8.
+Kotlin и Jetpack Compose, Gradle 8.9, JDK 17. Откройте в Android Studio папку, где лежит `settings.gradle.kts`.
 
-Ключ подписи в репозиторий не входит. Для release-сборки укажите его в `local.properties` (`ntmt.store.file`, `ntmt.store.password`, `ntmt.key.alias`, `ntmt.key.password`) или в переменных окружения `NTMT_STORE_FILE`, `NTMT_STORE_PASSWORD`, `NTMT_KEY_ALIAS`, `NTMT_KEY_PASSWORD`.
+Приватные файлы в репозиторий не входят (см. `.gitignore`):
+
+- `app/google-services.json` — настройки вашего проекта Firebase для уведомлений. Образец: `app/google-services.json.example`.
+- Ключ подписи (`*.jks`) и `local.properties`. Для release-сборки укажите в `local.properties` значения `ntmt.store.file`, `ntmt.store.password`, `ntmt.key.alias`, `ntmt.key.password` или задайте переменные окружения `NTMT_STORE_FILE`, `NTMT_STORE_PASSWORD`, `NTMT_KEY_ALIAS`, `NTMT_KEY_PASSWORD`.
+
+Сборка: `./gradlew assembleRelease`
